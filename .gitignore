@@ -16,6 +16,12 @@ modules.builtin
 *.img
 *.img.xz
 *.qcow2
+*.itb
+
+# Boot assets (built from source)
+myd-lr3576/boot-assets/boot.img
+myd-lr3576/boot-assets/idbloader.img
+myd-lr3576/boot-assets/u-boot.itb
 
 # Compressed files
 *.tar.gz
