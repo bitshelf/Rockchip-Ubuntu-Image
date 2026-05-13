@@ -1,0 +1,34 @@
+# Build artifacts
+myd-lr3576/artifacts/
+
+# Kernel build artifacts
+*.o
+*.ko
+*.mod.c
+*.mod
+*.symvers
+*.order
+.*.cmd
+.tmp_versions/
+modules.builtin
+
+# Disk images
+*.img
+*.img.xz
+*.qcow2
+
+# Compressed files
+*.tar.gz
+*.tar.xz
+*.zip
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db

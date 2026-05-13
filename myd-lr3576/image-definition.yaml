@@ -1,0 +1,105 @@
+name: ubuntu-server-myd-lr3576-arm64
+display-name: Ubuntu Server MYiR MYD-LR3576 arm64
+revision: 1
+architecture: arm64
+series: noble
+class: preinstalled
+
+# No gadget section — we build rootfs tarball only.
+# Disk assembly with Rockchip bootloader is handled by assemble-disk.sh.
+
+rootfs:
+  components:
+    - main
+    - restricted
+    - universe
+    - multiverse
+  archive: ubuntu
+  mirror: "https://mirrors.ustc.edu.cn/ubuntu-ports/"
+  pocket: updates
+  sources-list-deb822: true
+  seed:
+    urls:
+      - "git://git.launchpad.net/~ubuntu-core-dev/ubuntu-seeds/+git/"
+    branch: noble
+    names:
+      - server
+      - minimal
+      - standard
+      - cloud-image
+
+customization:
+  cloud-init:
+    user-data: |
+      #cloud-config
+      chpasswd:
+        expire: true
+        users:
+          - name: ubuntu
+            password: ubuntu
+            type: text
+  extra-packages:
+    # Boot and device tree tools
+    - name: u-boot-tools
+    - name: device-tree-compiler
+    # Filesystem tools
+    - name: dosfstools
+    - name: f2fs-tools
+    - name: btrfs-progs
+    - name: parted
+    - name: e2fsprogs
+    # Networking
+    - name: network-manager
+    - name: openssh-server
+    - name: ethtool
+    - name: iw
+    - name: wpasupplicant
+    # System utilities
+    - name: vim
+    - name: htop
+    - name: iotop
+    - name: usbutils
+    - name: pciutils
+    - name: lshw
+    # Firmware
+    - name: linux-firmware
+    - name: firmware-linux-free
+    # Development (for building kernel modules)
+    - name: build-essential
+    - name: flex
+    - name: bison
+    # Locale support
+    - name: language-pack-en-base
+    - name: language-pack-zh-hans-base
+  fstab:
+    - label: "rootfs"
+      mountpoint: "/"
+      filesystem-type: "ext4"
+      dump: false
+      fsck-order: 1
+    - label: "boot"
+      mountpoint: "/boot"
+      filesystem-type: "ext4"
+      dump: false
+      fsck-order: 1
+  manual:
+    make-dirs:
+      - path: /oem
+        permissions: 0755
+      - path: /userdata
+        permissions: 0755
+
+# Excluded via seed manipulation (not installed by server/minimal/standard seeds):
+#   Games: gnome-games, gnome-sudoku, gnome-mines, gnome-mahjongg, aisleriot
+#   Updates: unattended-upgrades, update-notifier, update-notifier-common,
+#            update-manager-core, ubuntu-release-upgrader-core
+#   Bloat: thunderbird, libreoffice-*, rhythmbox, transmission-*
+
+artifacts:
+  rootfs-tarball:
+    name: rootfs.tar.gz
+    compression: gzip
+  manifest:
+    name: ubuntu-24.04-preinstalled-server-arm64+myd-lr3576.manifest
+  filelist:
+    name: ubuntu-24.04-preinstalled-server-arm64+myd-lr3576.filelist

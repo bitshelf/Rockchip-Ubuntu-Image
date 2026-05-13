@@ -1,0 +1,4 @@
+LABEL=rootfs / ext4 defaults,noatime 0 1
+LABEL=boot /boot ext4 defaults,noatime 0 2
+LABEL=oem /oem ext4 defaults,noatime 0 2
+LABEL=userdata /userdata ext4 defaults,noatime 0 2

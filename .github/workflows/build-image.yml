@@ -1,0 +1,206 @@
+name: Build Ubuntu 24.04 Image for MYD-LR3576
+
+on:
+  push:
+    branches: [main, ubuntu-noble-myd-lr3576]
+    paths:
+      - 'myd-lr3576/**'
+      - '.github/workflows/build-image.yml'
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      sdk_version:
+        description: 'SDK version tag/branch to use'
+        required: false
+        default: 'v1.2.0'
+
+env:
+  DEBIAN_FRONTEND: noninteractive
+  SDK_PATH: /opt/rk3576-sdk
+
+jobs:
+  build-ubuntu-image:
+    name: Build RK3576 Ubuntu 24.04 Image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install host dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            qemu-user-static \
+            binfmt-support \
+            gdisk \
+            e2fsprogs \
+            u-boot-tools \
+            device-tree-compiler \
+            dpkg-dev \
+            debhelper \
+            rsync \
+            xz-utils \
+            dosfstools \
+            crossbuild-essential-arm64 \
+            flex \
+            bison \
+            bc \
+            python3 \
+            python3-pip
+
+          # Enable arm64 binfmt
+          sudo systemctl restart systemd-binfmt
+
+      - name: Install ubuntu-image
+        run: |
+          sudo snap install ubuntu-image --classic --channel=3.x/stable
+          /snap/bin/ubuntu-image version
+
+      - name: Cache SDK toolchain
+        uses: actions/cache@v4
+        with:
+          path: /opt/toolchain-cache
+          key: rk3576-toolchain-${{ inputs.sdk_version || 'v1.2.0' }}
+
+      - name: Prepare SDK workspace
+        run: |
+          mkdir -p "${SDK_PATH}"
+          # SDK should be pre-installed on self-hosted runner
+          # or fetched from a private artifact repo
+          if [[ ! -d "${SDK_PATH}/kernel-6.1" ]]; then
+            echo "SDK not found at ${SDK_PATH}"
+            echo "Ensure the RK3576 SDK is pre-installed on the runner"
+            echo "For self-hosted runners: mount the SDK at ${SDK_PATH}"
+            exit 1
+          fi
+
+      - name: ccache for kernel builds
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-rk3576-${{ github.sha }}
+          restore-keys: |
+            ccache-rk3576-
+
+      - name: Build U-Boot (if not cached)
+        run: |
+          cd "${SDK_PATH}/u-boot"
+          if [[ ! -f uboot.img ]]; then
+            export ARCH=arm64
+            export CROSS_COMPILE=aarch64-linux-gnu-
+            make rk3576_defconfig
+            make -j$(nproc)
+          fi
+
+      - name: Build kernel with DTS overlay support
+        run: |
+          cd "${SDK_PATH}/kernel-6.1"
+          export ARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CC="ccache aarch64-linux-gnu-gcc"
+
+          # Enable DTS overlay support
+          scripts/config -e CONFIG_OF_OVERLAY
+          scripts/config -e CONFIG_OF_CONFIGFS
+          make olddefconfig
+
+          # Build kernel
+          make -j$(nproc) Image modules dtbs
+
+          # Build DTS overlays if overlay source files exist
+          if ls arch/arm64/boot/dts/rockchip/*-overlay.dts 1>/dev/null 2>&1; then
+            for dts in arch/arm64/boot/dts/rockchip/*-overlay.dts; do
+              name=$(basename "${dts}" .dts)
+              cpp -nostdinc -I include -I arch/arm64/boot/dts -undef \
+                -x assembler-with-cpp "${dts}" | \
+                dtc -@ -I dts -O dtb -o "arch/arm64/boot/dts/rockchip/${name}.dtbo"
+            done
+          fi
+
+          # Build kernel .deb packages
+          make -j$(nproc) bindeb-pkg KDEB_PKGVERSION=6.1.118-myd-lr3576-1
+
+      - name: Build Rockchip userland packages
+        run: |
+          cd "${SDK_PATH}"
+          # Build MPP
+          if [[ -d external/mpp ]]; then
+            cd external/mpp
+            cmake -DCMAKE_TOOLCHAIN_FILE=../toolchain-arm64.cmake -B build . 2>/dev/null || \
+              cmake -B build -DCMAKE_INSTALL_PREFIX=/usr .
+            cmake --build build -j$(nproc)
+            cd build && checkinstall --pkgname=librockchip-mpp1 --pkgversion=1.5.0 \
+              --arch=arm64 --fstrans=no -y make install || true
+            cd "${SDK_PATH}"
+          fi
+          # Note: Full package build scripts would go here
+          # For CI, pre-built debs should be cached or stored as release artifacts
+
+      - name: Run ubuntu-image classic
+        run: |
+          cd /home/runner/work/*/myd-lr3576 || cd "$GITHUB_WORKSPACE/myd-lr3576"
+          mkdir -p artifacts
+          sudo /snap/bin/ubuntu-image classic \
+            --image-definition image-definition.yaml \
+            --output-dir artifacts/ \
+            -d 2>&1 | tee artifacts/ubuntu-image.log
+
+      - name: Assemble disk image
+        run: |
+          cd "$GITHUB_WORKSPACE/myd-lr3576"
+          sudo bash assemble-disk.sh
+
+      - name: Verify image
+        run: |
+          cd "$GITHUB_WORKSPACE/myd-lr3576"
+          IMG="artifacts/ubuntu-24.04-preinstalled-server-arm64+myd-lr3576.img"
+
+          echo "=== Partition Layout ==="
+          sgdisk -p "${IMG}"
+
+          echo "=== Bootloader LBA 64 check ==="
+          dd if="${IMG}" bs=512 skip=64 count=4 2>/dev/null | hexdump -C | head -2
+
+          echo "=== Bootloader LBA 16384 check ==="
+          dd if="${IMG}" bs=512 skip=16384 count=4 2>/dev/null | hexdump -C | head -2
+
+          echo "=== Rootfs verification ==="
+          LOOP=$(sudo losetup --show -fP "${IMG}")
+          MNT=$(mktemp -d)
+          sudo mount "${LOOP}p2" "${MNT}"
+          grep PRETTY_NAME "${MNT}/etc/os-release" || echo "WARNING: os-release missing"
+          sudo umount "${MNT}"
+          sudo losetup -d "${LOOP}"
+
+      - name: Compress and prepare artifacts
+        run: |
+          cd "$GITHUB_WORKSPACE/myd-lr3576/artifacts"
+          IMG="ubuntu-24.04-preinstalled-server-arm64+myd-lr3576.img"
+          xz -3 -T0 "${IMG}"
+          sha256sum "${IMG}.xz" > SHA256SUMS
+
+      - name: Upload final image
+        uses: actions/upload-artifact@v4
+        with:
+          name: ubuntu-24.04-myd-lr3576
+          path: |
+            myd-lr3576/artifacts/*.img.xz
+            myd-lr3576/artifacts/SHA256SUMS
+            myd-lr3576/artifacts/*.manifest
+            myd-lr3576/artifacts/*.filelist
+            myd-lr3576/artifacts/ubuntu-image.log
+          retention-days: 7
+
+      - name: Upload on release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/upload-artifact@v4
+        with:
+          name: ubuntu-24.04-myd-lr3576-release
+          path: |
+            myd-lr3576/artifacts/*.img.xz
+            myd-lr3576/artifacts/SHA256SUMS
+            myd-lr3576/artifacts/*.manifest
+          retention-days: 30
