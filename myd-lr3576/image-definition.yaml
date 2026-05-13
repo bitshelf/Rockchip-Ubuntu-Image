@@ -72,21 +72,24 @@ customization:
     - name: language-pack-en-base
     - name: language-pack-zh-hans-base
   fstab:
-    - label: "rootfs"
-      mountpoint: "/"
-      filesystem-type: "ext4"
-      dump: false
-      fsck-order: 1
+    # Note: rootfs is mounted read-only by initramfs overlay hook.
+    # The overlayfs merge mount provides the writable root at /.
+    # These fstab entries are for additional partitions only.
     - label: "boot"
       mountpoint: "/boot"
       filesystem-type: "ext4"
       dump: false
       fsck-order: 1
+    - label: "overlay"
+      mountpoint: "/overlay"
+      filesystem-type: "ext4"
+      dump: false
+      fsck-order: 2
   manual:
     make-dirs:
-      - path: /oem
+      - path: /ro
         permissions: 0755
-      - path: /userdata
+      - path: /overlay
         permissions: 0755
 
 # Excluded via seed manipulation (not installed by server/minimal/standard seeds):

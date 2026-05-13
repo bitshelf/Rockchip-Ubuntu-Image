@@ -198,7 +198,7 @@ verify_image() {
     info "Bootloader at LBA 16384:"
     dd if="${img}" bs=512 skip=16384 count=4 2>/dev/null | hexdump -C | head -4
 
-    # Mount and check OS
+    # Mount and check OS (p2 = rootfs, p3 = overlay)
     echo ""
     info "Verifying rootfs contents..."
     local loopdev
@@ -206,6 +206,16 @@ verify_image() {
     local mnt
     mnt=$(mktemp -d)
     sudo mount "${loopdev}p2" "${mnt}"
+
+    # Check overlay partition
+    local overlay_mnt
+    overlay_mnt=$(mktemp -d)
+    sudo mount "${loopdev}p3" "${overlay_mnt}"
+    if [[ -d "${overlay_mnt}/upper" && -d "${overlay_mnt}/work" ]]; then
+        info "  Overlay partition with upper/ and work/ dirs (OK)"
+    fi
+    sudo umount "${overlay_mnt}" 2>/dev/null || true
+    rmdir "${overlay_mnt}"
 
     if [[ -f "${mnt}/etc/os-release" ]]; then
         info "OS release:"
@@ -237,6 +247,14 @@ verify_image() {
     # Check DTS overlays
     if ls "${mnt}/boot/overlays/"*.dtbo 2>/dev/null; then
         info "  DTS overlays present (OK)"
+    fi
+
+    # Check overlay initramfs hook
+    info "Checking overlay initramfs hook..."
+    if [[ -x "${mnt}/etc/initramfs-tools/scripts/init-bottom/overlay" ]]; then
+        info "  initramfs overlay hook installed (OK)"
+    else
+        warn "  initramfs overlay hook missing!"
     fi
 
     # Check disabled timers

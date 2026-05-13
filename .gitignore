@@ -38,3 +38,5 @@ myd-lr3576/boot-assets/u-boot.itb
 # OS
 .DS_Store
 Thumbs.db
+
+ubuntu-image/

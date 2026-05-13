@@ -1,0 +1,82 @@
+#!/bin/sh -e
+# ==========================================================================
+# initramfs overlay hook — Set up overlayfs with read-only rootfs
+#
+# This script runs at init-bottom stage in initramfs.
+# It mounts the rootfs (read-only) as the lower layer,
+# mounts the overlay partition (read-write) and sets up
+# overlayfs with upper/work dirs on the overlay partition.
+#
+# Layout:
+#   /ro          = rootfs partition (lower, read-only)
+#   /overlay     = overlay partition
+#     /upper     = overlay upper directory (writable changes)
+#     /work      = overlay work directory
+#   ${rootmnt}   = overlayfs merge mount (final root)
+#
+# For system upgrade: replace rootfs partition content
+# For factory reset: wipe overlay partition upper/work dirs
+# ==========================================================================
+
+PREREQ=""
+prereqs()
+{
+    echo "$PREREQ"
+}
+
+case $1 in
+prereqs)
+    prereqs
+    exit 0
+    ;;
+esac
+
+. /scripts/functions
+
+OVERLAY_PART="/dev/disk/by-label/overlay"
+ROOTFS_PART="/dev/disk/by-label/rootfs"
+
+# Wait for rootfs partition
+wait_for_udev 10
+wait_for_ro "${ROOTFS_PART}" 5
+wait_for_ro "${OVERLAY_PART}" 5
+
+# Mount root filesystem read-only
+log_begin_msg "Mounting rootfs (read-only)"
+mkdir -p /ro
+mount -t ext4 -o ro,noatime "${ROOTFS_PART}" /ro
+log_end_msg
+
+# Mount overlay partition
+log_begin_msg "Mounting overlay partition"
+mkdir -p /overlay
+mount -t ext4 -o rw,noatime "${OVERLAY_PART}" /overlay
+
+# Ensure upper and work directories exist
+if [ ! -d /overlay/upper ]; then
+    mkdir -p /overlay/upper
+fi
+if [ ! -d /overlay/work ]; then
+    mkdir -p /overlay/work
+fi
+log_end_msg
+
+# Move the /boot directory from rootfs to overlay upper if it exists
+# so that /boot on the merged root points to the boot partition content
+if [ -d /ro/boot ]; then
+    mkdir -p /overlay/upper/boot
+fi
+
+# Set up overlayfs
+log_begin_msg "Setting up overlayfs"
+mount -t overlay overlay \
+    -o "lowerdir=/ro,upperdir=/overlay/upper,workdir=/overlay/work" \
+    "${rootmnt}"
+log_end_msg
+
+# Move mount points into the merged root
+mkdir -p "${rootmnt}/ro" "${rootmnt}/overlay"
+mount --move /ro "${rootmnt}/ro"  || true
+mount --move /overlay "${rootmnt}/overlay" || true
+
+exit 0
