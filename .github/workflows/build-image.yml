@@ -175,6 +175,15 @@ jobs:
           sudo umount "${MNT}"
           sudo losetup -d "${LOOP}"
 
+      - name: Run QEMU test suite (Ubuntu official)
+        run: |
+          cd "$GITHUB_WORKSPACE/myd-lr3576"
+          sudo apt-get install -y -qq qemu-user-static binfmt-support
+          sudo systemctl restart systemd-binfmt
+          bash tests/qemu-test.sh
+        env:
+          QEMU_LD_PREFIX: /usr/aarch64-linux-gnu
+
       - name: Compress and prepare artifacts
         run: |
           cd "$GITHUB_WORKSPACE/myd-lr3576/artifacts"
@@ -192,6 +201,7 @@ jobs:
             myd-lr3576/artifacts/*.manifest
             myd-lr3576/artifacts/*.filelist
             myd-lr3576/artifacts/ubuntu-image.log
+            myd-lr3576/artifacts/test-report.txt
           retention-days: 7
 
       - name: Upload on release
