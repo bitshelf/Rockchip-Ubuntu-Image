@@ -61,9 +61,8 @@ customization:
     - name: usbutils
     - name: pciutils
     - name: lshw
-    # Firmware
+    # Firmware (non-free firmware covers most hardware)
     - name: linux-firmware
-    - name: firmware-linux-free
     # Development (for building kernel modules)
     - name: build-essential
     - name: flex
