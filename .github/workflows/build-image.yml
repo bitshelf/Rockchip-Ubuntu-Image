@@ -81,9 +81,9 @@ jobs:
             --until install_packages \
             2>&1 | tee artifacts/ubuntu-image-step1.log
 
-      - name: Patch py3compile in chroot (QEMU workaround)
+      - name: Patch chroot (QEMU + snap workarounds)
         run: |
-          # Replace arm64 py3compile with no-op to avoid BrokenPipeError
+          # 1. Replace arm64 py3compile with no-op to avoid QEMU BrokenPipeError
           sudo bash -c 'cat > /tmp/ui-work/chroot/usr/bin/py3compile << "EOF"
           #!/bin/bash
           exit 0
@@ -94,7 +94,13 @@ jobs:
           exit 0
           EOF'
           sudo chmod +x /tmp/ui-work/chroot/usr/bin/py3clean
-          echo "py3compile patched in chroot"
+          echo "py3compile patched"
+
+          # 2. Purge snapd to prevent snap-preseed failure
+          # (snap-preseed requires core snap which is not available)
+          sudo chroot /tmp/ui-work/chroot apt-get purge -y -qq snapd 2>/dev/null || true
+          sudo chroot /tmp/ui-work/chroot apt-get autopurge -y -qq 2>/dev/null || true
+          echo "snapd purged from chroot"
 
       - name: Resume ubuntu-image classic
         run: |

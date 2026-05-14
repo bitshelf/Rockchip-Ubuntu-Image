@@ -1,0 +1,132 @@
+# Ubuntu Image Building Rules
+#
+# Sourced from: canonical/ubuntu-image, Debian Policy Manual,
+# Ubuntu Official Test Suite. Every agent session loads this.
+#
+# High-signal only: non-obvious, repeatedly encountered, specific.
+
+---
+
+## Ubuntu Compliance (MUST PASS ALL)
+
+### Image Identity
+- `/etc/os-release` reports correct series (noble=24.04, questing=26.04)
+- `dpkg --print-architecture` returns `arm64`
+- Ubuntu archive keyring present
+- apt sources use `ports.ubuntu.com` or approved CN mirror (`mirrors.ustc.edu.cn`)
+
+### Package Integrity
+- `dpkg --verify` — zero modified files
+- `apt-get check` — zero broken deps
+- `dpkg --audit` — clean
+- All packages from Ubuntu archive or approved PPA
+
+### Excluded (Embedded)
+- No: gnome-games, gnome-sudoku, gnome-mines, gnome-mahjongg, aisleriot
+- No: unattended-upgrades, update-notifier, update-notifier-common, update-manager-core, ubuntu-release-upgrader-core
+- No: thunderbird, libreoffice-*, rhythmbox, transmission-*
+
+### Systemd
+- Disabled: apt-daily.timer, apt-daily-upgrade.timer, motd-news.timer, snapd.refresh.timer, snapd.snap-refresh.timer
+
+---
+
+## ubuntu-image Classic Mode
+
+- YAML conforms to `internal/imagedefinition/README.rst` spec
+- `architecture: arm64`, `class: preinstalled`
+- Seeds: [server, minimal, standard] — NO cloud-image (snap pre-seed fails)
+- Seed URLs: `https://` not `git://` (CI compat)
+- Mirror: `mirrors.ustc.edu.cn/ubuntu-ports/` for CN
+- `linux-firmware` only — `firmware-linux-free` absent in noble
+- No gadget section (U-Boot bootloader unsupported by ubuntu-image)
+- Disk assembly: manual via `assemble-disk.sh`
+
+### QEMU Cross-Build
+- Two-stage: `--until install_packages` → patch py3compile → `--resume`
+- Patch: replace chroot `/usr/bin/py3compile` and `py3clean` with no-op stubs
+- Host deps: qemu-user-static + binfmt-support
+- Timeout: 360 min
+
+---
+
+## Board Config (`boards/<name>.conf`)
+
+- ALL hardware values in config, NEVER in scripts
+- Source URIs: `file://path` | `https://url` | `git://url` (Yocto-style)
+- Partitions from SDK `rockdev/parameter.txt`
+- Serial: Rockchip=ttyFIQ0@1500000, Allwinner=ttyS0@115200, Amlogic=ttyAML0@115200
+- No product names in code or configs
+- SDK_PATH required — no default, error if unset
+- BOARD required — no default, error if config not found
+
+---
+
+## OverlayFS / Read-Only Rootfs
+
+- Kernel cmdline: `ro rootwait root=PARTLABEL=rootfs`
+- Overlay partition: `upper/` + `work/` dirs
+- Initramfs hook: `etc/initramfs-tools/scripts/init-bottom/overlay`
+- Fstab uses LABEL=, not device paths
+- Upgrade: replace rootfs partition, overlay persists
+- Reset: wipe overlay upper/ + work/
+
+---
+
+## DTS Overlay
+
+- `CONFIG_OF_OVERLAY=y`, `CONFIG_OF_CONFIGFS=y`
+- Overlay .dts: `/dts-v1/; /plugin/;` + all dt-bindings includes
+- DTB compiled with `-@` for symbol table
+- .dtbo → `/boot/overlays/`
+- extlinux.conf: `fdtoverlays` directive
+
+---
+
+## CI (GitHub Actions)
+
+- Runner: `ubuntu-24.04` (amd64+QEMU) or `self-hosted` ARM64
+- ubuntu-image: built from Go source (snap unavailable in CI)
+- Upload: rootfs.tar.gz + manifest + filelist + test-report.txt
+- Retention: 7d PR, 30d release
+- Timeout: 360 min
+- Deps: qemu-user-static, binfmt-support, debootstrap, germinate, golang-go, gdisk, e2fsprogs
+
+---
+
+## Testing (Ubuntu Official Methods)
+
+Test suite: `tests/qemu-test.sh` → `test-report.txt`
+
+1. `dpkg --verify` — zero modified
+2. `apt-get check` — zero broken
+3. `dpkg --audit` — clean
+4. os-release matches series
+5. architecture = arm64
+6. No excluded packages
+7. Timers disabled
+8. Initramfs overlay hook executable
+9. /boot has: boot.img, dtbs/, overlays/, extlinux/
+10. /overlay has: upper/, work/
+
+---
+
+## Git Commits
+
+- English, imperative mood
+- Prefix: feat:, fix:, refactor:, docs:, ci:
+- Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>
+
+---
+
+## Project Structure
+
+```
+ubuntu/            # Build scripts (not board-specific)
+boards/            # Board configs only
+scripts/           # Helpers
+tests/             # Ubuntu official test suite
+docs/              # PORTING, ARCHITECTURE, BUILD
+.rules             # This file
+AGENTS.md -> .rules
+```
