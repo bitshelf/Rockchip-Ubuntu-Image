@@ -86,21 +86,23 @@ jobs:
 
       - name: Patch chroot (QEMU + snap workarounds)
         run: |
-          # 1. Replace arm64 py3compile with no-op to avoid QEMU BrokenPipeError
+          # 1. Use dpkg-divert to permanently replace py3compile with no-op
+          # Regular file overwrite gets undone when python3-minimal is installed
+          sudo chroot /tmp/ui-work/chroot dpkg-divert --local --rename --add /usr/bin/py3compile 2>/dev/null || true
           sudo bash -c 'cat > /tmp/ui-work/chroot/usr/bin/py3compile << "EOF"
           #!/bin/bash
           exit 0
           EOF'
           sudo chmod +x /tmp/ui-work/chroot/usr/bin/py3compile
+          sudo chroot /tmp/ui-work/chroot dpkg-divert --local --rename --add /usr/bin/py3clean 2>/dev/null || true
           sudo bash -c 'cat > /tmp/ui-work/chroot/usr/bin/py3clean << "EOF"
           #!/bin/bash
           exit 0
           EOF'
           sudo chmod +x /tmp/ui-work/chroot/usr/bin/py3clean
-          echo "py3compile patched"
+          echo "py3compile permanently patched via dpkg-divert"
 
           # 2. Purge snapd to prevent snap-preseed failure
-          # (snap-preseed requires core snap which is not available)
           sudo chroot /tmp/ui-work/chroot apt-get purge -y -qq snapd 2>/dev/null || true
           sudo chroot /tmp/ui-work/chroot apt-get autopurge -y -qq 2>/dev/null || true
           echo "snapd purged from chroot"
