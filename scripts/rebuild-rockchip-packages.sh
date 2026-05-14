@@ -17,7 +17,7 @@
 # ==========================================================================
 set -euo pipefail
 
-PATCHES_DIR="$(cd "$(dirname "$0")/.." && pwd)/packages-patches/userland"
+PATCHES_DIR="$(cd "$(dirname "$0")/.." && pwd)/patches/userland"
 OUTPUT_DEBS="${OUTPUT_DEBS:-$(cd "$(dirname "$0")/.." && pwd)/ubuntu/rockchip-debs}"
 WORK_DIR="${WORK_DIR:-/tmp/rockchip-rebuild}"
 UBUNTU_SERIES="${UBUNTU_SERIES:-noble}"
