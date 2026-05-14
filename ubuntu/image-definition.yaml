@@ -1,5 +1,5 @@
-name: ubuntu-server-myd-lr3576-arm64
-display-name: Ubuntu Server Rockchip RK3576 arm64
+name: ubuntu-server-rk3576-arm64
+display-name: Ubuntu Server RK3576 arm64
 revision: 1
 architecture: arm64
 series: noble
@@ -104,6 +104,6 @@ artifacts:
     name: rootfs.tar.gz
     compression: gzip
   manifest:
-    name: ubuntu-24.04-preinstalled-server-arm64+myd-lr3576.manifest
+    name: ubuntu-24.04-preinstalled-server-arm64+rk3576.manifest
   filelist:
-    name: ubuntu-24.04-preinstalled-server-arm64+myd-lr3576.filelist
+    name: ubuntu-24.04-preinstalled-server-arm64+rk3576.filelist

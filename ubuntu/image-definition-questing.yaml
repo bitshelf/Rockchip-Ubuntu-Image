@@ -1,4 +1,4 @@
-name: ubuntu-server-myd-lr3576-arm64-questing
+name: ubuntu-server-rk3576-arm64-questing
 display-name: Ubuntu Server Rockchip RK3576 arm64 (26.04 Questing)
 revision: 1
 architecture: arm64
@@ -84,6 +84,6 @@ artifacts:
     name: rootfs.tar.gz
     compression: gzip
   manifest:
-    name: ubuntu-26.04-preinstalled-server-arm64+myd-lr3576.manifest
+    name: ubuntu-26.04-preinstalled-server-arm64+rk3576.manifest
   filelist:
-    name: ubuntu-26.04-preinstalled-server-arm64+myd-lr3576.filelist
+    name: ubuntu-26.04-preinstalled-server-arm64+rk3576.filelist
