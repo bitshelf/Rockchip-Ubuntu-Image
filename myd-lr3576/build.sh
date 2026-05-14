@@ -33,8 +33,7 @@ source "${BOARD_CONF}"
 # Ubuntu series (default from board config)
 UBUNTU_SERIES="${UBUNTU_SERIES:-${UBUNTU_SERIES_DEFAULT}}"
 
-# SDK location (configurable via environment)
-SDK_PATH="${SDK_PATH:-/media/loh/rockchip/lr3576_v2}"
+# Sources resolved via board config URIs (file://, https://, git://)
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -44,6 +43,41 @@ NC='\033[0m'
 info()  { echo -e "${GREEN}[INFO]${NC} $*"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC} $*"; }
 error() { echo -e "${RED}[ERROR]${NC} $*"; exit 1; }
+
+# -------------------------------------------------------------------
+# Yocto-style source resolution
+# Supports: file://path | https://url | git://url
+# -------------------------------------------------------------------
+SRC_CACHE="${HOME}/.cache/ubuntu-image-sources"
+
+resolve_source() {
+    local uri="$1"
+    local name="$2"
+    local srcrev="${3:-}"
+
+    if [[ "${uri}" =~ ^file:// ]]; then
+        # Local path
+        local path="${uri#file://}"
+        if [[ ! -d "${path}" ]]; then
+            error "Local source not found: ${path}"
+        fi
+        echo "${path}"
+        return
+    fi
+
+    # Remote: clone to cache
+    mkdir -p "${SRC_CACHE}"
+    local cached="${SRC_CACHE}/${name}"
+
+    if [[ -d "${cached}/.git" ]]; then
+        info "Updating cached source: ${name}"
+        (cd "${cached}" && git fetch --depth 1 origin "${srcrev}" 2>/dev/null) || true
+    else
+        info "Cloning source: ${uri} -> ${cached}"
+        git clone --depth 1 ${srcrev:+--branch "${srcrev}"} "${uri}" "${cached}"
+    fi
+    echo "${cached}"
+}
 
 # -------------------------------------------------------------------
 # Check prerequisites
@@ -74,42 +108,40 @@ check_prereqs() {
 # Copy boot assets from SDK
 # -------------------------------------------------------------------
 copy_boot_assets() {
-    info "Copying boot assets from SDK..."
+    info "Copying boot assets..."
 
-    local sdk_uboot="${SDK_PATH}/u-boot"
-    local sdk_kernel="${SDK_PATH}/kernel-6.1"
-    local sdk_output="${SDK_PATH}/output/firmware"
+    # Resolve source paths (local or remote via Yocto-style URIs)
+    local uboot_src
+    uboot_src=$(resolve_source "${UBOOT_URI}" "uboot-${BOARD}" "${UBOOT_SRCREV}")
+    local kernel_src
+    kernel_src=$(resolve_source "${KERNEL_URI}" "kernel-${BOARD}" "${KERNEL_SRCREV}")
     local boot_assets="${SCRIPT_DIR}/boot-assets"
 
     # idbloader (SPL + DDR init)
-    if [[ -f "${sdk_uboot}/${IDBLOADER_SOURCE}" ]]; then
-        cp -v "${sdk_uboot}/${IDBLOADER_SOURCE}" "${boot_assets}/idbloader.img"
-    elif [[ -f "${sdk_output}/MiniLoaderAll.bin" ]]; then
-        cp -v "${sdk_output}/MiniLoaderAll.bin" "${boot_assets}/idbloader.img"
+    if [[ -f "${uboot_src}/${IDBLOADER_SOURCE}" ]]; then
+        cp -v "${uboot_src}/${IDBLOADER_SOURCE}" "${boot_assets}/idbloader.img"
     else
-        warn "idbloader (${IDBLOADER_SOURCE}) not found"
+        warn "idbloader (${IDBLOADER_SOURCE}) not found in ${uboot_src}"
     fi
 
     # u-boot.itb
-    if [[ -f "${sdk_uboot}/${UBOOT_SOURCE}" ]]; then
-        cp -v "${sdk_uboot}/${UBOOT_SOURCE}" "${boot_assets}/u-boot.itb"
-    elif [[ -f "${sdk_output}/${UBOOT_SOURCE}" ]]; then
-        cp -v "${sdk_output}/${UBOOT_SOURCE}" "${boot_assets}/u-boot.itb"
+    if [[ -f "${uboot_src}/${UBOOT_SOURCE}" ]]; then
+        cp -v "${uboot_src}/${UBOOT_SOURCE}" "${boot_assets}/u-boot.itb"
     else
-        warn "u-boot (${UBOOT_SOURCE}) not found"
+        warn "u-boot (${UBOOT_SOURCE}) not found in ${uboot_src}"
     fi
 
     # boot.img (kernel FIT image)
-    if [[ -f "${sdk_output}/${BOOTIMG_SOURCE}" ]]; then
-        cp -v "${sdk_output}/${BOOTIMG_SOURCE}" "${boot_assets}/boot.img"
-    elif [[ -f "${sdk_kernel}/${BOOTIMG_SOURCE}" ]]; then
-        cp -v "${sdk_kernel}/${BOOTIMG_SOURCE}" "${boot_assets}/boot.img"
+    if [[ -f "${kernel_src}/boot.img" ]]; then
+        cp -v "${kernel_src}/boot.img" "${boot_assets}/boot.img"
+    elif [[ -f "${kernel_src}/arch/arm64/boot/Image" ]]; then
+        cp -v "${kernel_src}/arch/arm64/boot/Image" "${boot_assets}/"
     else
-        warn "boot.img (${BOOTIMG_SOURCE}) not found"
+        warn "boot.img not found in ${kernel_src}"
     fi
 
     # Device tree
-    local dtb_path="${sdk_kernel}/${OVERLAY_SOURCE_DIR}/${DTB_BASE}"
+    local dtb_path="${kernel_src}/${OVERLAY_SOURCE_DIR}/${DTB_BASE}"
     if [[ -f "${dtb_path}" ]]; then
         cp -v "${dtb_path}" "${boot_assets}/"
     else
