@@ -49,8 +49,22 @@ jobs:
 
       - name: Install ubuntu-image
         run: |
-          sudo snap wait system seed.loaded
-          sudo snap install ubuntu-image --classic --channel=3.x/stable
+          # Retry snap install up to 5 times (snap store can be flaky in CI)
+          for i in $(seq 1 5); do
+            echo "Attempt $i: installing ubuntu-image snap..."
+            if sudo snap install ubuntu-image --classic --channel=3.x/stable 2>&1; then
+              echo "Snap install succeeded on attempt $i"
+              break
+            fi
+            if [ $i -eq 5 ]; then
+              echo "ERROR: snap install failed after 5 attempts"
+              echo "=== Snap debug info ==="
+              sudo snap list 2>&1 || true
+              sudo systemctl status snapd 2>&1 || true
+              exit 1
+            fi
+            sleep 10
+          done
           /snap/bin/ubuntu-image version
 
       - name: Select image definition
