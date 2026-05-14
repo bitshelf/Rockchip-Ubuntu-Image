@@ -42,11 +42,27 @@
 - No gadget section (U-Boot bootloader unsupported by ubuntu-image)
 - Disk assembly: manual via `assemble-disk.sh`
 
-### QEMU Cross-Build
-- Two-stage: `--until install_packages` → patch py3compile → `--resume`
-- Patch: replace chroot `/usr/bin/py3compile` and `py3clean` with no-op stubs
-- Host deps: qemu-user-static + binfmt-support
+### Cross-Compilation (Host Architecture Matrix)
+
+### amd64 Host → arm64 Target
+- **ubuntu-image rootfs**: QEMU user static + binfmt_misc (debootstrap --arch arm64)
+- **Two-stage**: `--until install_packages` → patch py3compile → `--resume`
+- **Package rebuild**: `sbuild --host=arm64` with QEMU chroot (Ubuntu official)
+- **Fallback**: `dpkg-buildpackage -aarm64 -d` for simple packages
+- Host deps: qemu-user-static, binfmt-support, crossbuild-essential-arm64, sbuild
 - Timeout: 360 min
+
+### arm64 Host → arm64 Target (Native)
+- **ubuntu-image rootfs**: Native debootstrap (no QEMU needed)
+- **No py3compile patch needed** (no QEMU race condition)
+- **Package rebuild**: `dpkg-buildpackage -us -uc -b` (native)
+- **Build time**: ~15-20 min (vs 3-4 hours on QEMU)
+- **Recommended** for production builds
+
+### GitHub Actions
+- **amd64 runner** (`ubuntu-24.04`): QEMU cross-build (360 min timeout)
+- **ARM64 runner** (`self-hosted` ARM64): Native build (fast, ~20 min)
+- Set `RUNNER_LABEL= self-hosted` in repo Variables for ARM64 runner
 
 ---
 

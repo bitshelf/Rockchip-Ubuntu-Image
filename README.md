@@ -56,10 +56,35 @@ BootROM → idbloader (LBA 64) → U-Boot (LBA 16384) → boot.img (FIT: kernel+
 2. **只读 rootfs + OverlayFS 覆盖层** — 断电安全，系统升级只需替换 rootfs 分区
 3. **DTS Overlay 支持** — 设备树覆盖层方便修改硬件配置，无需重新编译完整 DTB
 
+## 交叉编译 (主机架构适配)
+
+根据主机架构选择官方推荐的编译方式：
+
+| 主机架构 | rootfs 构建 | 包重建 | 编译时间 |
+|----------|------------|--------|----------|
+| **amd64** | QEMU user static + debootstrap | `sbuild --host=arm64` | 3-4 小时 |
+| **arm64** | Native debootstrap | `dpkg-buildpackage` | 15-20 分钟 |
+| **CI amd64** | QEMU (两阶段+py3compile 补丁) | 跳过(用预编译 .deb) | ~1 小时 |
+| **CI arm64** | Native (自托管 runner) | Native build | ~20 分钟 |
+
+### amd64 主机
+```bash
+sudo apt-get install qemu-user-static binfmt-support crossbuild-essential-arm64 sbuild
+# rootfs: QEMU 自动处理 arm64 模拟
+# 包重建: sbuild --host=arm64
+```
+
+### arm64 主机 (推荐，生产构建)
+```bash
+# 无需 QEMU，直接原生编译
+sudo /snap/bin/ubuntu-image classic image-definition.yaml --output-dir artifacts/
+bash scripts/rebuild-rockchip-packages.sh
+```
+
 ## GitHub Actions CI
 
-编译通过 GitHub Actions 自动执行：
-- `ubuntu-24.04` (amd64) runner + QEMU arm64 交叉编译
+- `ubuntu-24.04` (amd64) runner + QEMU arm64 交叉编译 (默认)
+- 自托管 ARM64 runner 可用时自动切换原生编译 (设置 `RUNNER_LABEL=self-hosted`)
 - 支持 workflow_dispatch 选择 Ubuntu 系列 (noble/questing)
 - 构建产物保留 7 天
 
