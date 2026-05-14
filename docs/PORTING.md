@@ -20,27 +20,27 @@ ubuntu/
 ### Step 1: 复制板子配置模板
 
 ```bash
-cp boards/board-template.conf boards/orangepi5.conf
+cp boards/board-template.conf boards/rk3588-board.conf
 ```
 
 ### Step 2: 编辑配置文件
 
 ```bash
-vim boards/orangepi5.conf
+vim boards/rk3588-board.conf
 ```
 
 必须修改的字段：
 
 | 字段 | 说明 | 示例 |
 |------|------|------|
-| `BOARD_NAME` | 板子短名 | `orangepi5` |
+| `BOARD_NAME` | 板子短名 | `rk3588-board` |
 | `BOARD_VENDOR` | 厂商名 | `Orange Pi` |
 | `BOARD_MODEL` | 型号 | `5 (RK3588S)` |
 | `SOC_FAMILY` | SoC 家族 | `rockchip` |
 | `SOC_MODEL` | SoC 型号 | `rk3588` |
 | `IDBLOADER_SOURCE` | SPL loader 文件名 | `rk3588_spl_loader_v1.0.bin` |
 | `UBOOT_SOURCE` | U-Boot 文件名 | `uboot.img` |
-| `DTB_BASE` | 设备树基础文件名 | `rk3588s-orangepi-5.dtb` |
+| `DTB_BASE` | 设备树基础文件名 | `rk3588-board.dtb` |
 | `SERIAL_CONSOLE_DEV` | 串口设备名 | `ttyS2` (Allwinner=`ttyS0`, Rockchip=`ttyFIQ0`) |
 | `SERIAL_CONSOLE_BAUD` | 串口波特率 | `1500000` (Rockchip) / `115200` (Allwinner) |
 | `MALI_GPU_VARIANT` | GPU 型号 | `g610` (RK3588) / `g52` (RK3568) / `g31` (RK3576) |
@@ -50,8 +50,8 @@ vim boards/orangepi5.conf
 
 ```bash
 # 从 SDK 复制引导器到 boot-assets/
-export BOARD=orangepi5
-export SDK_PATH=/path/to/orangepi5-sdk
+export BOARD=rk3588-board
+export SDK_PATH=/path/to/rk3588-board-sdk
 ./build.sh   # 自动从 SDK 复制引导文件
 ```
 
@@ -71,7 +71,7 @@ make ARCH=arm64 olddefconfig
 make ARCH=arm64 dtbs
 
 # 编译 overlays
-for dts in arch/arm64/boot/dts/rockchip/orangepi5-*-overlay.dts; do
+for dts in arch/arm64/boot/dts/rockchip/rk3588-board-*-overlay.dts; do
     name=$(basename $dts .dts)
     gcc -E -nostdinc -I include -I arch/arm64/boot/dts \
         -undef -x assembler-with-cpp $dts | \
@@ -82,8 +82,8 @@ done
 ### Step 5: 构建 & 测试
 
 ```bash
-BOARD=orangepi5 ./build.sh
-sudo BOARD=orangepi5 bash assemble-disk.sh
+BOARD=rk3588-board ./build.sh
+sudo BOARD=rk3588-board bash assemble-disk.sh
 bash tests/qemu-test.sh
 ```
 
@@ -116,7 +116,7 @@ bash tests/qemu-test.sh
 
 ## 配置文件字段参考
 
-查阅 `boards/board-template.conf` 和 `boards/myd-lr3576.conf` 获取完整的字段列表和注释。
+查阅 `boards/board-template.conf` 和 `boards/rk3576.conf` 获取完整的字段列表和注释。
 
 ## FAQ
 

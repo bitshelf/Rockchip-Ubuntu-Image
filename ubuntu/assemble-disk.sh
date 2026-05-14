@@ -11,7 +11,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "${SCRIPT_DIR}")"
 
-# Default board - override with BOARD=orangepi5 ./assemble-disk.sh
+# Default board - override with BOARD=rk3588-board ./assemble-disk.sh
 BOARD="${BOARD:-myd-lr3576}"
 BOARD_CONF="${PROJECT_DIR}/boards/${BOARD}.conf"
 

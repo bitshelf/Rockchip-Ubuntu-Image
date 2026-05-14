@@ -1,6 +1,6 @@
-# Rockchip MYD-LR3576 Ubuntu 镜像构建
+# Rockchip RK3576 Ubuntu 镜像构建
 
-基于 `ubuntu-image` (Canonical 官方工具) 为 MYiR MYD-LR3576 (RK3576) 构建 Ubuntu 24.04 / 26.04 LTS 镜像。
+基于 `ubuntu-image` (Canonical 官方工具) 为 Rockchip RK3576 (RK3576) 构建 Ubuntu 24.04 / 26.04 LTS 镜像。
 
 ## 快速开始
 
@@ -71,11 +71,11 @@ RK3576 SDK 路径通过环境变量 `SDK_PATH` 配置，默认为 `/media/loh/ro
 
 ```bash
 # 1. 复制板子配置
-cp boards/board-template.conf boards/orangepi5.conf
+cp boards/board-template.conf boards/rk3588-board.conf
 # 2. 编辑配置
-vim boards/orangepi5.conf
+vim boards/rk3588-board.conf
 # 3. 构建
-BOARD=orangepi5 ./build.sh
+BOARD=rk3588-board ./build.sh
 ```
 
 详见 [SoC 移植指南](docs/PORTING.md) 和 [架构文档](docs/ARCHITECTURE.md)。

@@ -4,8 +4,8 @@ set -euo pipefail
 # ==========================================================================
 # build.sh — Ubuntu Image Build Orchestrator (multi-board)
 #
-# Usage:  BOARD=orangepi5 ./build.sh
-#         BOARD=myd-lr3576 UBUNTU_SERIES=questing ./build.sh
+# Usage:  BOARD=rk3588-board ./build.sh
+#         BOARD=rk3576 UBUNTU_SERIES=questing ./build.sh
 #
 # Prerequisites:
 #   - ubuntu-image snap (v3.x) or built from Go source
@@ -18,8 +18,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "${SCRIPT_DIR}")"
 ARTIFACTS_DIR="${SCRIPT_DIR}/artifacts"
 
-# Board selection (default: myd-lr3576)
-BOARD="${BOARD:-myd-lr3576}"
+# Board selection (default: rk3576)
+BOARD="${BOARD:-rk3576}"
 BOARD_CONF="${PROJECT_DIR}/boards/${BOARD}.conf"
 
 if [[ ! -f "${BOARD_CONF}" ]]; then
@@ -351,7 +351,7 @@ verify_image() {
 main() {
     echo ""
     echo "============================================="
-    echo " MYD-LR3576 Ubuntu 24.04 Image Builder"
+    echo " RK3576 Ubuntu 24.04 Image Builder"
     echo "============================================="
     echo ""
 

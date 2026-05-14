@@ -1,4 +1,4 @@
-# U-Boot boot script for MYiR MYD-LR3576
+# U-Boot boot script for Rockchip RK3576
 # Compiled with: mkimage -A arm64 -O linux -T script -C none -d boot.cmd boot.scr
 
 # Load kernel FIT image from boot partition

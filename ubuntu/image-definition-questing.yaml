@@ -1,5 +1,5 @@
 name: ubuntu-server-myd-lr3576-arm64-questing
-display-name: Ubuntu Server MYiR MYD-LR3576 arm64 (26.04 Questing)
+display-name: Ubuntu Server Rockchip RK3576 arm64 (26.04 Questing)
 revision: 1
 architecture: arm64
 series: questing

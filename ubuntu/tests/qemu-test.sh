@@ -478,7 +478,7 @@ generate_report() {
 # -------------------------------------------------------------------
 main() {
     rm -f "${REPORT_FILE}"
-    echo "Ubuntu 24.04 MYD-LR3576 Image Test Report" | tee "${REPORT_FILE}"
+    echo "Ubuntu 24.04 RK3576 Image Test Report" | tee "${REPORT_FILE}"
     echo "==========================================" | tee -a "${REPORT_FILE}"
     echo "" | tee -a "${REPORT_FILE}"
 

@@ -82,7 +82,7 @@ GitHub Actions 自动在 `ubuntu-24.04` (amd64) runner 上构建。
 
 ### 手动触发
 
-1. GitHub → Actions → Build Ubuntu Image for MYD-LR3576 → Run workflow
+1. GitHub → Actions → Build Ubuntu Image for RK3576 → Run workflow
 2. 选择 Ubuntu 系列 (noble/questing)
 3. 构建产物在 Actions artifacts 中下载
 
