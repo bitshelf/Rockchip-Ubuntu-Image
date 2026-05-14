@@ -1,0 +1,82 @@
+name: Rebuild Rockchip Patched Packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: 'Package to rebuild (empty = all critical)'
+        required: false
+        type: string
+        default: ''
+  push:
+    paths:
+      - 'patches/userland/**'
+      - 'scripts/rebuild-packages.sh'
+
+jobs:
+  rebuild:
+    name: Rebuild Rockchip packages
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [libdrm, wayland]
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            crossbuild-essential-arm64 \
+            dpkg-dev devscripts ubuntu-dev-tools \
+            debhelper meson pkg-config quilt \
+            qemu-user-static binfmt-support
+          sudo systemctl restart systemd-binfmt
+
+      - name: Rebuild ${{ matrix.package }}
+        run: |
+          mkdir -p ubuntu/rockchip-debs /tmp/rebuild
+          cd /tmp/rebuild
+
+          PKG="${{ matrix.package }}"
+          echo "=== Rebuilding $PKG for arm64 ==="
+
+          # Get source
+          pull-lp-source "$PKG" noble
+          SRCDIR=$(ls -d /tmp/rebuild/${PKG}-* | head -1)
+          cd "$SRCDIR"
+          echo "Source: $SRCDIR"
+
+          # Apply patches
+          PATCH_DIR="$GITHUB_WORKSPACE/patches/userland/$PKG"
+          applied=0; failed=0
+          if [[ -d "$PATCH_DIR" ]]; then
+            for pf in $(find "$PATCH_DIR" -name '*.patch' -type f | sort); do
+              if patch -p1 -N --dry-run < "$pf" 2>/dev/null; then
+                patch -p1 < "$pf" 2>/dev/null
+                applied=$((applied + 1))
+                echo "  OK: $(basename $pf)"
+              else
+                echo "  FAIL: $(basename $pf)"
+                failed=$((failed + 1))
+              fi
+            done
+          fi
+          echo "Patches: $applied applied, $failed failed"
+
+          # Build deps + cross-build
+          sudo apt-get build-dep -y -qq "$PKG" 2>&1 | tail -2
+          dpkg-buildpackage -aarm64 -d -us -uc -b -j$(nproc) 2>&1 | tail -20
+
+          # Copy debs
+          cp /tmp/rebuild/*.deb "$GITHUB_WORKSPACE/ubuntu/rockchip-debs/" 2>/dev/null || true
+          ls "$GITHUB_WORKSPACE/ubuntu/rockchip-debs/"
+
+      - name: Upload rebuilt packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: rockchip-packages-${{ matrix.package }}
+          path: ubuntu/rockchip-debs/*.deb
+          retention-days: 30
