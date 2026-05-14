@@ -43,29 +43,18 @@ jobs:
             qemu-user-static binfmt-support \
             gdisk e2fsprogs xz-utils dosfstools \
             u-boot-tools device-tree-compiler \
-            snapd
+            golang-go git
           sudo systemctl restart systemd-binfmt
-          sudo systemctl restart snapd
 
-      - name: Install ubuntu-image
+      - name: Build ubuntu-image from source
         run: |
-          # Retry snap install up to 5 times (snap store can be flaky in CI)
-          for i in $(seq 1 5); do
-            echo "Attempt $i: installing ubuntu-image snap..."
-            if sudo snap install ubuntu-image --classic --channel=3.x/stable 2>&1; then
-              echo "Snap install succeeded on attempt $i"
-              break
-            fi
-            if [ $i -eq 5 ]; then
-              echo "ERROR: snap install failed after 5 attempts"
-              echo "=== Snap debug info ==="
-              sudo snap list 2>&1 || true
-              sudo systemctl status snapd 2>&1 || true
-              exit 1
-            fi
-            sleep 10
-          done
-          /snap/bin/ubuntu-image version
+          # ubuntu-image snap cannot be installed in CI runners
+          # Build from source instead
+          git clone --depth 1 --branch 3.1 https://github.com/canonical/ubuntu-image.git /tmp/ubuntu-image-src
+          cd /tmp/ubuntu-image-src
+          go build -o ubuntu-image ./cmd/ubuntu-image
+          sudo cp ubuntu-image /usr/local/bin/ubuntu-image
+          /usr/local/bin/ubuntu-image version || true
 
       - name: Select image definition
         id: select
@@ -102,7 +91,7 @@ jobs:
         run: |
           cd myd-lr3576
           mkdir -p artifacts
-          sudo PATH="/usr/local/bin:$PATH" /snap/bin/ubuntu-image classic \
+          sudo PATH="/usr/local/bin:$PATH" /usr/local/bin/ubuntu-image classic \
             "${{ steps.select.outputs.def_file }}" \
             --output-dir artifacts/ \
             2>&1 | tee artifacts/ubuntu-image.log
