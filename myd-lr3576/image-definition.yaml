@@ -26,7 +26,6 @@ rootfs:
       - server
       - minimal
       - standard
-      - cloud-image
 
 customization:
   cloud-init:
