@@ -49,12 +49,12 @@ jobs:
       - name: Build ubuntu-image from source
         run: |
           # ubuntu-image snap cannot be installed in CI runners
-          # Build from source instead
-          git clone --depth 1 --branch 3.1 https://github.com/canonical/ubuntu-image.git /tmp/ubuntu-image-src
+          # Build from source (canonical/ubuntu-image main branch)
+          git clone --depth 1 https://github.com/canonical/ubuntu-image.git /tmp/ubuntu-image-src
           cd /tmp/ubuntu-image-src
           go build -o ubuntu-image ./cmd/ubuntu-image
           sudo cp ubuntu-image /usr/local/bin/ubuntu-image
-          /usr/local/bin/ubuntu-image version || true
+          echo "ubuntu-image built successfully"
 
       - name: Select image definition
         id: select
