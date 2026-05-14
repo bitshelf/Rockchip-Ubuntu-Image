@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - 'myd-lr3576/**'
+      - 'ubuntu/**'
       - '.github/workflows/build-image.yml'
   pull_request:
     branches: [main]
@@ -72,7 +72,7 @@ jobs:
 
       - name: Run ubuntu-image (until install_packages)
         run: |
-          cd myd-lr3576
+          cd ubuntu
           mkdir -p artifacts
           sudo /usr/local/bin/ubuntu-image classic \
             "${{ steps.select.outputs.def_file }}" \
@@ -98,7 +98,7 @@ jobs:
 
       - name: Resume ubuntu-image classic
         run: |
-          cd myd-lr3576
+          cd ubuntu
           sudo /usr/local/bin/ubuntu-image classic \
             "${{ steps.select.outputs.def_file }}" \
             --output-dir artifacts/ \
@@ -108,7 +108,7 @@ jobs:
 
       - name: Verify rootfs tarball
         run: |
-          cd myd-lr3576/artifacts
+          cd ubuntu/artifacts
           if [[ -f rootfs.tar.gz ]]; then
             ls -lh rootfs.tar.gz
             echo "=== Manifest ==="
@@ -122,7 +122,7 @@ jobs:
 
       - name: Run Ubuntu official test suite
         run: |
-          cd myd-lr3576
+          cd ubuntu
           sudo bash tests/qemu-test.sh
 
       - name: Upload rootfs artifact
@@ -130,11 +130,11 @@ jobs:
         with:
           name: ubuntu-rootfs-${{ steps.select.outputs.series }}-arm64
           path: |
-            myd-lr3576/artifacts/rootfs.tar.gz
-            myd-lr3576/artifacts/*.manifest
-            myd-lr3576/artifacts/*.filelist
-            myd-lr3576/artifacts/ubuntu-image.log
-            myd-lr3576/artifacts/test-report.txt
+            ubuntu/artifacts/rootfs.tar.gz
+            ubuntu/artifacts/*.manifest
+            ubuntu/artifacts/*.filelist
+            ubuntu/artifacts/ubuntu-image.log
+            ubuntu/artifacts/test-report.txt
           retention-days: 7
 
       - name: Upload on release
@@ -143,7 +143,7 @@ jobs:
         with:
           name: ubuntu-${{ steps.select.outputs.series }}-myd-lr3576-release
           path: |
-            myd-lr3576/artifacts/rootfs.tar.gz
-            myd-lr3576/artifacts/*.manifest
-            myd-lr3576/artifacts/test-report.txt
+            ubuntu/artifacts/rootfs.tar.gz
+            ubuntu/artifacts/*.manifest
+            ubuntu/artifacts/test-report.txt
           retention-days: 30

@@ -16,11 +16,11 @@
 export SDK_PATH=/media/loh/rockchip/lr3576_v2
 
 # 从 SDK 复制引导器
-cp $SDK_PATH/u-boot/rk3576_spl_loader_v1.09.108.bin myd-lr3576/boot-assets/idbloader.img
-cp $SDK_PATH/u-boot/uboot.img myd-lr3576/boot-assets/u-boot.itb
-cp $SDK_PATH/kernel-6.1/boot.img myd-lr3576/boot-assets/boot.img
-cp $SDK_PATH/kernel-6.1/arch/arm64/boot/dts/rockchip/myd-lr3576.dtb myd-lr3576/boot-assets/
-cp $SDK_PATH/kernel-6.1/arch/arm64/boot/dts/rockchip/*-overlay.dtbo myd-lr3576/boot-assets/overlays/
+cp $SDK_PATH/u-boot/rk3576_spl_loader_v1.09.108.bin ubuntu/boot-assets/idbloader.img
+cp $SDK_PATH/u-boot/uboot.img ubuntu/boot-assets/u-boot.itb
+cp $SDK_PATH/kernel-6.1/boot.img ubuntu/boot-assets/boot.img
+cp $SDK_PATH/kernel-6.1/arch/arm64/boot/dts/rockchip/myd-lr3576.dtb ubuntu/boot-assets/
+cp $SDK_PATH/kernel-6.1/arch/arm64/boot/dts/rockchip/*-overlay.dtbo ubuntu/boot-assets/overlays/
 ```
 
 ### 2. 构建 rootfs tarball

@@ -19,7 +19,7 @@ bash tests/qemu-test.sh
 ## 目录结构
 
 ```
-myd-lr3576/
+ubuntu/
   image-definition.yaml          # Ubuntu 24.04 镜像定义
   image-definition-questing.yaml # Ubuntu 26.04 镜像定义
   build.sh                       # 构建编排脚本

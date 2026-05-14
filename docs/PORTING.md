@@ -8,7 +8,7 @@
 
 ```text
 boards/<board>.conf     ← 板级硬件配置 (唯一需要修改的文件)
-myd-lr3576/
+ubuntu/
   image-definition.yaml ← Ubuntu 版本相关 (series, packages, seeds)
   assemble-disk.sh      ← 通用磁盘组装 (读取 board config)
   build.sh              ← 通用构建编排 (读取 board config)
@@ -57,10 +57,10 @@ export SDK_PATH=/path/to/orangepi5-sdk
 
 或手动：
 ```bash
-cp $SDK_PATH/u-boot/rk3588_spl_loader_v1.0.bin myd-lr3576/boot-assets/idbloader.img
-cp $SDK_PATH/u-boot/uboot.img myd-lr3576/boot-assets/u-boot.itb
-cp $SDK_PATH/kernel/boot.img myd-lr3576/boot-assets/boot.img
-cp $SDK_PATH/kernel/arch/arm64/boot/dts/rockchip/*.dtb myd-lr3576/boot-assets/
+cp $SDK_PATH/u-boot/rk3588_spl_loader_v1.0.bin ubuntu/boot-assets/idbloader.img
+cp $SDK_PATH/u-boot/uboot.img ubuntu/boot-assets/u-boot.itb
+cp $SDK_PATH/kernel/boot.img ubuntu/boot-assets/boot.img
+cp $SDK_PATH/kernel/arch/arm64/boot/dts/rockchip/*.dtb ubuntu/boot-assets/
 ```
 
 ### Step 4: 编译 DTS Overlay（Rockchip）
