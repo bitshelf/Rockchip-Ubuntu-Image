@@ -4,56 +4,143 @@ on:
   workflow_dispatch:
     inputs:
       package:
-        description: 'Package to rebuild (empty = all critical)'
+        description: 'Package to rebuild (empty = all)'
         required: false
         type: string
         default: ''
+      ubuntu_series:
+        description: 'Ubuntu series'
+        required: true
+        type: choice
+        options:
+          - noble
+          - questing
+        default: noble
   push:
     paths:
       - 'patches/userland/**'
-      - 'scripts/rebuild-packages.sh'
+      - 'scripts/rebuild-in-chroot.sh'
+      - '.github/workflows/rebuild-packages.yml'
+
+permissions:
+  contents: write
+
+env:
+  DEBIAN_FRONTEND: noninteractive
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
+  # =========================================================================
+  # Rebuild each package in QEMU arm64 chroot (native build, no cross-compile)
+  # =========================================================================
   rebuild:
-    name: Rebuild Rockchip packages
+    name: ${{ matrix.package }} (arm64)
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    timeout-minutes: 180
     strategy:
       fail-fast: false
       matrix:
-        package: [libdrm, wayland]
-    steps:
-      - uses: actions/checkout@v6
+        package:
+          - libdrm
+          - wayland
+          - weston
+          - xserver
+          - v4l-utils
+          - mpv
+          - blueman
+          - cheese
+          - openbox
+          - pcmanfm
+          - wireplumber
 
-      - name: Install build tools
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install host dependencies
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq \
-            crossbuild-essential-arm64 \
-            dpkg-dev devscripts ubuntu-dev-tools \
-            debhelper meson pkg-config quilt \
-            qemu-user-static binfmt-support
+            qemu-user-static binfmt-support \
+            debootstrap devscripts ubuntu-dev-tools \
+            dpkg-dev quilt
           sudo systemctl restart systemd-binfmt
 
-      - name: Rebuild ${{ matrix.package }}
+      - name: Setup arm64 chroot
         run: |
-          mkdir -p ubuntu/rockchip-debs /tmp/rebuild
-          cd /tmp/rebuild
+          CHROOT="/tmp/rk-arm64-chroot"
+          if [[ ! -f "$CHROOT/usr/bin/qemu-aarch64-static" ]]; then
+            echo "Creating noble arm64 chroot..."
+            sudo rm -rf "$CHROOT"
+            sudo debootstrap --arch arm64 noble "$CHROOT" http://ports.ubuntu.com/ubuntu-ports/ 2>&1 | tail -5
+            sudo cp /usr/bin/qemu-aarch64-static "$CHROOT/usr/bin/"
+            sudo chroot "$CHROOT" bash -c '
+              export DEBIAN_FRONTEND=noninteractive
+              apt-get update -qq
+              apt-get install -y -qq build-essential dpkg-dev devscripts ubuntu-dev-tools fakeroot 2>&1 | tail -3
+            '
+            echo "Chroot ready"
+          else
+            echo "Using existing chroot"
+          fi
 
+      - name: Rebuild ${{ matrix.package }} for arm64
+        run: |
           PKG="${{ matrix.package }}"
-          echo "=== Rebuilding $PKG for arm64 ==="
+          SERIES="${{ inputs.ubuntu_series || 'noble' }}"
+          CHROOT="/tmp/rk-arm64-chroot"
+          OUTPUT="${{ github.workspace }}/ubuntu/rockchip-debs"
+          PATCHDIR="${{ github.workspace }}/patches/userland"
+          mkdir -p "$OUTPUT"
 
-          # Get source
-          pull-lp-source "$PKG" noble
-          SRCDIR=$(ls -d /tmp/rebuild/${PKG}-* | head -1)
-          cd "$SRCDIR"
-          echo "Source: $SRCDIR"
+          echo "=== Rebuilding $PKG for arm64 ($SERIES) ==="
+
+          # Resolve source package name
+          case "$PKG" in
+            xserver) SRC="xorg-server" ;;
+            *) SRC="$PKG" ;;
+          esac
+
+          # Determine patch directory (noble-adapted > version-specific > top-level)
+          if [[ -d "$PATCHDIR/$PKG/noble" ]] && ls "$PATCHDIR/$PKG/noble/"*.patch &>/dev/null; then
+            USE_PATCHES="$PATCHDIR/$PKG/noble"
+          elif ls "$PATCHDIR/$PKG/"*.patch &>/dev/null 2>&1; then
+            USE_PATCHES="$PATCHDIR/$PKG"
+          else
+            USE_PATCHES=$(find "$PATCHDIR/$PKG" -maxdepth 2 -name "*.patch" -type f -print -quit 2>/dev/null | xargs dirname 2>/dev/null || echo "")
+          fi
+
+          echo "Patch dir: $USE_PATCHES"
+          echo "Source pkg: $SRC"
+
+          # Copy build files to chroot
+          sudo mkdir -p "$CHROOT/build"
+          sudo rm -rf "$CHROOT/build/patches" "$CHROOT/build/src"
+
+          if [[ -n "$USE_PATCHES" && -d "$USE_PATCHES" ]]; then
+            sudo cp -r "$USE_PATCHES" "$CHROOT/build/patches"
+          fi
+
+          # Build inside chroot
+          sudo chroot "$CHROOT" bash -c '
+          set -euo pipefail
+          export DEBIAN_FRONTEND=noninteractive
+          cd /build
+
+          echo "Getting source for $SRC ($SERIES)..."
+          pull-lp-source $SRC $SERIES 2>&1 | tail -2
+          srcdir=$(find /build -maxdepth 1 -type d -name "${SRC}-*" -o -name "${PKG}-*" | head -1)
+          if [[ -z "$srcdir" ]]; then
+            echo "ERROR: source not found for $SRC"
+            exit 1
+          fi
+          cd "$srcdir"
+          echo "Source: $(pwd)"
 
           # Apply patches
-          PATCH_DIR="$GITHUB_WORKSPACE/patches/userland/$PKG"
           applied=0; failed=0
-          if [[ -d "$PATCH_DIR" ]]; then
-            for pf in $(find "$PATCH_DIR" -name '*.patch' -type f | sort); do
+          if [[ -d /build/patches ]]; then
+            for pf in $(find /build/patches -maxdepth 1 -name "*.patch" -type f | sort); do
               if patch -p1 -N --dry-run < "$pf" 2>/dev/null; then
                 patch -p1 < "$pf" 2>/dev/null
                 applied=$((applied + 1))
@@ -66,17 +153,76 @@ jobs:
           fi
           echo "Patches: $applied applied, $failed failed"
 
-          # Build deps + cross-build
-          sudo apt-get build-dep -y -qq "$PKG" 2>&1 | tail -2
-          dpkg-buildpackage -aarm64 -d -us -uc -b -j$(nproc) 2>&1 | tail -20
+          # Install build deps
+          echo "Installing build deps..."
+          apt-get build-dep -y -qq $SRC 2>&1 | tail -5 || {
+            echo "WARNING: build-dep failed, attempting with -d"
+            apt-get build-dep -d -y -qq $SRC 2>&1 | tail -3
+          }
 
-          # Copy debs
-          cp /tmp/rebuild/*.deb "$GITHUB_WORKSPACE/ubuntu/rockchip-debs/" 2>/dev/null || true
-          ls "$GITHUB_WORKSPACE/ubuntu/rockchip-debs/"
+          # Build natively for arm64
+          echo "Building..."
+          dpkg-buildpackage -us -uc -b -j$(nproc) 2>&1 | tail -40
+          ' 2>&1 | tee /tmp/build-${{ matrix.package }}.log
+
+          echo "=== Build log ==="
+          tail -20 /tmp/build-${{ matrix.package }}.log
+
+          # Copy debs out
+          sudo find "$CHROOT/build" -maxdepth 1 -name "*.deb" -exec cp -v {} "$OUTPUT/" \; 2>/dev/null || true
+          echo "=== Output debs ==="
+          ls -lh "$OUTPUT/" 2>/dev/null || echo "(no debs produced for $PKG)"
 
       - name: Upload rebuilt packages
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
-          name: rockchip-packages-${{ matrix.package }}
+          name: rockchip-debs-${{ matrix.package }}-arm64
           path: ubuntu/rockchip-debs/*.deb
           retention-days: 30
+        continue-on-error: true
+
+      - name: Save results manifest
+        run: |
+          mkdir -p ubuntu/rockchip-debs
+          echo "${{ matrix.package }} $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> ubuntu/rockchip-debs/MANIFEST.txt
+          ls ubuntu/rockchip-debs/ >> ubuntu/rockchip-debs/MANIFEST.txt
+
+  # =========================================================================
+  # Publish all rebuilt packages to a single release
+  # =========================================================================
+  publish:
+    name: Publish release
+    runs-on: ubuntu-24.04
+    needs: rebuild
+    if: always() && needs.rebuild.result != 'failure'
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v6
+        with:
+          pattern: rockchip-debs-*
+          path: all-debs
+          merge-multiple: true
+
+      - name: List packages
+        run: |
+          echo "=== Rebuilt packages ==="
+          find all-debs -name "*.deb" -exec ls -lh {} \; || echo "No packages built"
+
+      - name: Create release
+        if: success()
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Rockchip Packages (${{ inputs.ubuntu_series || 'noble' }})"
+          tag_name: "pkgs-${{ inputs.ubuntu_series || 'noble' }}-latest"
+          body: |
+            Rockchip-patched arm64 packages for Ubuntu ${{ inputs.ubuntu_series || 'noble' }}
+
+            Built: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+            Packages: libdrm, wayland, weston, xserver, v4l-utils, mpv, blueman, cheese, openbox, pcmanfm, wireplumber
+
+            Use with RK3576 Ubuntu images.
+          files: all-debs/*.deb
+          prerelease: false
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
