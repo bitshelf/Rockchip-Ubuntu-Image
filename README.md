@@ -6,7 +6,7 @@
 
 ```bash
 # 1. 构建 rootfs (需要 sudo)
-cd myd-lr3576
+cd  ubuntu
 sudo /snap/bin/ubuntu-image classic image-definition.yaml --output-dir artifacts/
 
 # 2. 组装磁盘镜像
@@ -65,7 +65,7 @@ BootROM → idbloader (LBA 64) → U-Boot (LBA 16384) → boot.img (FIT: kernel+
 
 ## SDK 依赖
 
-RK3576 SDK 路径通过环境变量 `SDK_PATH` 配置，默认为 `/media/loh/rockchip/lr3576_v2/`。
+SDK 路径通过环境变量 `SDK_PATH` 配置。未设置时构建脚本报错退出。
 
 ## 扩展到其他 SoC
 

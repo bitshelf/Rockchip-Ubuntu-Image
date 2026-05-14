@@ -11,7 +11,7 @@ set -euo pipefail
 #   - ubuntu-image snap (v3.x) or built from Go source
 #   - qemu-user-static + binfmt-support for arm64 cross-build
 #   - sgdisk (gdisk package)
-#   - SDK at SDK_PATH with built kernel, U-Boot, and packages
+#   - SDK_PATH must be set in environment (path to Rockchip SDK root)
 # ==========================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -167,6 +167,9 @@ copy_boot_assets() {
 # Copy Rockchip debs from SDK
 # -------------------------------------------------------------------
 copy_rockchip_debs() {
+    if [[ -z "${SDK_PATH:-}" ]]; then
+        error "SDK_PATH is not set! Export SDK_PATH=/path/to/rk3576-sdk"
+    fi
     info "Copying Rockchip .deb packages from SDK..."
 
     local sdk_debs="${SDK_PATH}/debian/packages/arm64"
@@ -192,6 +195,9 @@ copy_rockchip_debs() {
 # Copy kernel debs from SDK
 # -------------------------------------------------------------------
 copy_kernel_debs() {
+    if [[ -z "${SDK_PATH:-}" ]]; then
+        error "SDK_PATH is not set! Export SDK_PATH=/path/to/rk3576-sdk"
+    fi
     info "Copying kernel .deb packages from SDK..."
 
     local sdk_parent="${SDK_PATH}/.."

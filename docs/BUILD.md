@@ -13,14 +13,15 @@
 ### 1. 准备引导文件
 
 ```bash
-export SDK_PATH=/media/loh/rockchip/lr3576_v2
+# 必须设置 SDK_PATH，指向 SDK 根目录
+export SDK_PATH=/path/to/rk3576-sdk
 
-# 从 SDK 复制引导器
-cp $SDK_PATH/u-boot/rk3576_spl_loader_v1.09.108.bin ubuntu/boot-assets/idbloader.img
-cp $SDK_PATH/u-boot/uboot.img ubuntu/boot-assets/u-boot.itb
-cp $SDK_PATH/kernel-6.1/boot.img ubuntu/boot-assets/boot.img
-cp $SDK_PATH/kernel-6.1/arch/arm64/boot/dts/rockchip/myd-lr3576.dtb ubuntu/boot-assets/
-cp $SDK_PATH/kernel-6.1/arch/arm64/boot/dts/rockchip/*-overlay.dtbo ubuntu/boot-assets/overlays/
+# 从 SDK 复制引导器（具体文件名参考 boards/<your-board>.conf）
+cp $SDK_PATH/u-boot/rk3576_spl_loader_v1.09.108.bin boot-assets/idbloader.img
+cp $SDK_PATH/u-boot/uboot.img boot-assets/u-boot.itb
+cp $SDK_PATH/kernel-6.1/boot.img boot-assets/boot.img
+cp $SDK_PATH/kernel-6.1/arch/arm64/boot/dts/rockchip/*.dtb boot-assets/
+cp $SDK_PATH/kernel-6.1/arch/arm64/boot/dts/rockchip/*-overlay.dtbo boot-assets/overlays/
 ```
 
 ### 2. 构建 rootfs tarball
