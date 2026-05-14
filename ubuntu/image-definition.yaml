@@ -27,6 +27,9 @@ rootfs:
       - minimal
       - standard
 
+extra-snaps:
+    - name: core24
+      channel: latest/stable
 customization:
   cloud-init:
     user-data: |
