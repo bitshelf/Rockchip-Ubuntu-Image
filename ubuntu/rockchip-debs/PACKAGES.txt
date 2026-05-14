@@ -60,3 +60,4 @@ These are pre-built binaries copied directly from SDK:
 - rkwifibt (WiFi/BT firmware)
 - rktoolkit (Rockchip utilities)
 - libdrm-cursor (HW cursor)
+# Build trigger: Thu 14 May 2026 11:23:16 AM UTC
