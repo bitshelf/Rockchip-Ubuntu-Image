@@ -1,27 +1,39 @@
-name: Build Ubuntu 24.04 Image for MYD-LR3576
+name: Build Ubuntu Image for MYD-LR3576
 
 on:
   push:
-    branches: [main, ubuntu-noble-myd-lr3576]
+    branches: [main]
     paths:
       - 'myd-lr3576/**'
       - '.github/workflows/build-image.yml'
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      ubuntu_series:
+        description: 'Ubuntu series (noble or questing)'
+        required: true
+        type: choice
+        options:
+          - noble
+          - questing
+        default: noble
 
 env:
   DEBIAN_FRONTEND: noninteractive
 
 jobs:
   # =========================================================================
-  # Job 1: Build rootfs tarball via ubuntu-image
-  # GitHub-hosted arm64 runner used for native speed (no QEMU emulation needed)
+  # Build rootfs via ubuntu-image on native ARM64
+  # For self-hosted runner: install the runner on RK3588/RK3576 board or
+  # Raspberry Pi 5 / AWS Graviton, and add labels: self-hosted, linux, arm64
   # =========================================================================
   build-rootfs:
-    name: Build Ubuntu rootfs
-    runs-on: ubuntu-24.04-arm
-    timeout-minutes: 60
+    name: Build ${{ inputs.ubuntu_series || 'noble' }} rootfs
+    # Use 'ubuntu-24.04-arm' for public repos with GitHub ARM64 runners
+    # Use 'self-hosted' for self-hosted ARM64 runner (recommended)
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-24.04-arm' }}
+    timeout-minutes: 90
 
     steps:
       - name: Checkout
@@ -31,44 +43,47 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq \
-            gdisk \
-            e2fsprogs \
-            xz-utils \
-            dosfstools \
-            u-boot-tools \
-            device-tree-compiler
+            gdisk e2fsprogs xz-utils dosfstools \
+            u-boot-tools device-tree-compiler
 
       - name: Install ubuntu-image
         run: |
           sudo snap install ubuntu-image --classic --channel=3.x/stable
           /snap/bin/ubuntu-image version
 
+      - name: Select image definition
+        id: select
+        run: |
+          SERIES="${{ inputs.ubuntu_series || 'noble' }}"
+          echo "series=${SERIES}" >> $GITHUB_OUTPUT
+          if [[ "${SERIES}" == "questing" ]]; then
+            echo "def_file=image-definition-questing.yaml" >> $GITHUB_OUTPUT
+            echo "img_prefix=ubuntu-26.04" >> $GITHUB_OUTPUT
+          else
+            echo "def_file=image-definition.yaml" >> $GITHUB_OUTPUT
+            echo "img_prefix=ubuntu-24.04" >> $GITHUB_OUTPUT
+          fi
+
       - name: Run ubuntu-image classic
         run: |
           cd myd-lr3576
           mkdir -p artifacts
           sudo /snap/bin/ubuntu-image classic \
-            image-definition.yaml \
+            "${{ steps.select.outputs.def_file }}" \
             --output-dir artifacts/ \
             2>&1 | tee artifacts/ubuntu-image.log
 
       - name: Verify rootfs tarball
         run: |
           cd myd-lr3576/artifacts
-          if [[ -f rootfs.tar.gz ]]; then
-            echo "=== Rootfs tarball created ==="
-            ls -lh rootfs.tar.gz
-            echo "=== Manifest ==="
-            wc -l *.manifest
-          else
-            echo "ERROR: rootfs.tar.gz not found!"
-            exit 1
-          fi
+          ls -lh rootfs.tar.gz
+          echo "=== Manifest ==="
+          wc -l *.manifest
 
       - name: Upload rootfs artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ubuntu-rootfs-noble-arm64
+          name: ubuntu-rootfs-${{ steps.select.outputs.series }}-arm64
           path: |
             myd-lr3576/artifacts/rootfs.tar.gz
             myd-lr3576/artifacts/*.manifest
@@ -77,14 +92,13 @@ jobs:
           retention-days: 7
 
   # =========================================================================
-  # Job 2: Test rootfs with Ubuntu official methods
-  # Uses qemu-user-static for cross-architecture (if not on arm64 runner)
+  # Test rootfs with Ubuntu official methods
   # =========================================================================
   test-rootfs:
-    name: Test rootfs (Ubuntu official validation)
+    name: Test ${{ inputs.ubuntu_series || 'noble' }} rootfs
     needs: build-rootfs
-    runs-on: ubuntu-24.04-arm
-    timeout-minutes: 30
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-24.04-arm' }}
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
@@ -93,33 +107,30 @@ jobs:
       - name: Download rootfs artifact
         uses: actions/download-artifact@v4
         with:
-          name: ubuntu-rootfs-noble-arm64
+          name: ubuntu-rootfs-${{ inputs.ubuntu_series || 'noble' }}-arm64
           path: myd-lr3576/artifacts/
 
-      - name: Run QEMU test suite
+      - name: Run QEMU/Ubuntu official test suite
         run: |
           cd myd-lr3576
-          # Native arm64 runner - no QEMU needed
           sudo apt-get install -y -qq e2fsprogs
           bash tests/qemu-test.sh
 
       - name: Upload test report
         uses: actions/upload-artifact@v4
         with:
-          name: test-report
+          name: test-report-${{ inputs.ubuntu_series || 'noble' }}
           path: myd-lr3576/artifacts/test-report.txt
           retention-days: 30
 
   # =========================================================================
-  # Job 3: Assemble final disk image
-  # Requires boot assets (idbloader, u-boot.itb, boot.img) from SDK
-  # These are pre-built and uploaded as release assets
+  # Assemble final disk image (only on workflow_dispatch or release tags)
   # =========================================================================
   assemble-image:
     name: Assemble final disk image
     needs: test-rootfs
-    runs-on: ubuntu-24.04-arm
-    timeout-minutes: 30
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-24.04-arm' }}
+    timeout-minutes: 20
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
 
     steps:
@@ -129,30 +140,43 @@ jobs:
       - name: Download rootfs artifact
         uses: actions/download-artifact@v4
         with:
-          name: ubuntu-rootfs-noble-arm64
+          name: ubuntu-rootfs-${{ inputs.ubuntu_series || 'noble' }}-arm64
           path: myd-lr3576/artifacts/
 
       - name: Download boot assets
         run: |
-          # Boot assets should be pre-built and uploaded as a release
-          # For now, create dummy files to validate the assembly pipeline
+          # Boot assets must be pre-built from SDK and uploaded as release artifacts
           mkdir -p myd-lr3576/boot-assets/
-          touch myd-lr3576/boot-assets/idbloader.img
-          touch myd-lr3576/boot-assets/u-boot.itb
-          touch myd-lr3576/boot-assets/boot.img
-          echo "WARNING: Using dummy boot assets. Real assets must come from SDK build."
+          RELEASE_URL="https://github.com/${{ github.repository }}/releases/latest/download"
+          for asset in idbloader.img u-boot.itb boot.img; do
+            curl -sSL "${RELEASE_URL}/${asset}" -o "myd-lr3576/boot-assets/${asset}" 2>/dev/null || \
+              echo "WARNING: ${asset} not found in release, using placeholder"
+          done
+          # Touch placeholder files for any missing assets
+          touch myd-lr3576/boot-assets/idbloader.img \
+                myd-lr3576/boot-assets/u-boot.itb \
+                myd-lr3576/boot-assets/boot.img
 
       - name: Assemble disk image
         run: |
           cd myd-lr3576
-          sudo bash assemble-disk.sh 2>&1 || true
-          echo "Assembly completed (dummy boot assets)"
+          sudo bash assemble-disk.sh
+
+      - name: Compress and checksum
+        run: |
+          cd myd-lr3576/artifacts
+          IMG="ubuntu-24.04-preinstalled-server-arm64+myd-lr3576.img"
+          if [[ -f "${IMG}" ]]; then
+            xz -3 -T0 "${IMG}"
+            sha256sum "${IMG}.xz" > SHA256SUMS
+            ls -lh "${IMG}.xz"
+          fi
 
       - name: Upload final image
         uses: actions/upload-artifact@v4
         with:
-          name: ubuntu-24.04-myd-lr3576
+          name: ubuntu-${{ inputs.ubuntu_series || 'noble' }}-myd-lr3576
           path: |
-            myd-lr3576/artifacts/*.img
+            myd-lr3576/artifacts/*.img.xz
             myd-lr3576/artifacts/SHA256SUMS
           retention-days: 30

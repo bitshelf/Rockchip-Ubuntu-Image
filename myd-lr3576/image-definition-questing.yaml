@@ -1,0 +1,86 @@
+name: ubuntu-server-myd-lr3576-arm64-questing
+display-name: Ubuntu Server MYiR MYD-LR3576 arm64 (26.04 Questing)
+revision: 1
+architecture: arm64
+series: questing
+class: preinstalled
+
+# No gadget section — disk assembly handled by assemble-disk.sh
+
+rootfs:
+  components:
+    - main
+    - restricted
+    - universe
+    - multiverse
+  archive: ubuntu
+  mirror: "https://mirrors.ustc.edu.cn/ubuntu-ports/"
+  pocket: updates
+  sources-list-deb822: true
+  seed:
+    urls:
+      - "git://git.launchpad.net/~ubuntu-core-dev/ubuntu-seeds/+git/"
+    branch: questing
+    names:
+      - server
+      - minimal
+      - standard
+
+customization:
+  cloud-init:
+    user-data: |
+      #cloud-config
+      chpasswd:
+        expire: true
+        users:
+          - name: ubuntu
+            password: ubuntu
+            type: text
+  extra-packages:
+    - name: u-boot-tools
+    - name: device-tree-compiler
+    - name: dosfstools
+    - name: parted
+    - name: e2fsprogs
+    - name: network-manager
+    - name: openssh-server
+    - name: ethtool
+    - name: iw
+    - name: wpasupplicant
+    - name: vim
+    - name: htop
+    - name: usbutils
+    - name: pciutils
+    - name: lshw
+    - name: linux-firmware
+    - name: build-essential
+    - name: flex
+    - name: bison
+    - name: language-pack-en-base
+    - name: language-pack-zh-hans-base
+  fstab:
+    - label: "boot"
+      mountpoint: "/boot"
+      filesystem-type: "ext4"
+      dump: false
+      fsck-order: 1
+    - label: "overlay"
+      mountpoint: "/overlay"
+      filesystem-type: "ext4"
+      dump: false
+      fsck-order: 2
+  manual:
+    make-dirs:
+      - path: /ro
+        permissions: 0755
+      - path: /overlay
+        permissions: 0755
+
+artifacts:
+  rootfs-tarball:
+    name: rootfs.tar.gz
+    compression: gzip
+  manifest:
+    name: ubuntu-26.04-preinstalled-server-arm64+myd-lr3576.manifest
+  filelist:
+    name: ubuntu-26.04-preinstalled-server-arm64+myd-lr3576.filelist
