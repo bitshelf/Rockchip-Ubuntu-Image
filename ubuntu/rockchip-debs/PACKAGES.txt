@@ -1,0 +1,62 @@
+# Rockchip Package Rebuild Manifest
+# ==========================================================================
+#
+# Rebuild command: sudo bash scripts/rebuild-rockchip-packages.sh
+# Requires: deb-src lines in /etc/apt/sources.list for Ubuntu archive
+#
+# Packages are applied in dependency-aware order.
+# Patches sourced from Rockchip SDK: debian/packages-patches/
+# ==========================================================================
+
+## Build Order (dependency-aware)
+
+### Critical: Graphics Infrastructure
+| Package | Ubuntu Pkg | Patches | Patch Dir | Purpose |
+|---------|-----------|---------|-----------|---------|
+| libdrm | libdrm | 4 | libdrm | Rockchip DRM device, auth bypass |
+| wayland | wayland | 2 | wayland/1.21.0 | Build flexibility, connection robustness |
+
+### High: Display Servers
+| Package | Ubuntu Pkg | Patches | Patch Dir | Purpose |
+|---------|-----------|---------|-----------|---------|
+| weston | weston | 92 | weston/10.0.1 | Mali GPU, multi-head, AFBC, HW planes |
+| xserver | xorg-server | 81 | xserver/21.1.7 | GLES/Mali, RGA 2D, NV12/NV16/AFBC Xv |
+
+### High: GStreamer Media Framework
+| Package | Ubuntu Pkg | Patches | Patch Dir | Purpose |
+|---------|-----------|---------|-----------|---------|
+| gstreamer1.0 | gstreamer1.0 | 4 | gstreamer1/gstreamer1 | Core fixes |
+| gst-plugins-base1.0 | gst-plugins-base1.0 | 22 | gstreamer1/gst1-plugins-base | RGA, dmabuf, GL upload |
+| gst-plugins-good1.0 | gst-plugins-good1.0 | 13 | gstreamer1/gst1-plugins-good | V4L2 source, RGA flip |
+| gst-plugins-bad1.0 | gst-plugins-bad1.0 | 49 | gstreamer1/gst1-plugins-bad | kmssink, waylandsink, HDR |
+
+### Medium: Video/Image
+| Package | Ubuntu Pkg | Patches | Patch Dir | Purpose |
+|---------|-----------|---------|-----------|---------|
+| v4l-utils | v4l-utils | 7 | v4l-utils | MPP plugin, DMA-buf, 64 frames |
+
+### Low: Desktop Utilities
+| Package | Ubuntu Pkg | Patches | Patch Dir | Purpose |
+|---------|-----------|---------|-----------|---------|
+| blueman | blueman | 2 | blueman | BT keyboard, power fix |
+| cheese | cheese | 3 | cheese | MPP VP8/H264 encoder |
+| wireplumber | wireplumber | 1 | wireplumber | Audio priority |
+| openbox | openbox | 5 | openbox | Outline moving, limit interval |
+| pcmanfm | pcmanfm | 3 | pcmanfm | Outline mode, multi-monitor |
+
+### Complex: Browser (manual review recommended)
+| Package | Ubuntu Pkg | Patches | Patch Dir | Purpose |
+|---------|-----------|---------|-----------|---------|
+| chromium | chromium-browser | 52 | chromium/ | V4L2 VDA/VEA, HEVC, AV1, Mali |
+
+## Rockchip Proprietary Packages (no source patches)
+These are pre-built binaries copied directly from SDK:
+- libmali (Mali GPU userspace, G31/G52/G610 variants)
+- mpp (Media Process Platform)
+- gst-rkmpp (GStreamer MPP plugin)
+- rga/rga2 (2D Raster Graphics Accelerator)
+- rkaiq/rkisp (Camera ISP/3A)
+- rknpu2 (NPU runtime)
+- rkwifibt (WiFi/BT firmware)
+- rktoolkit (Rockchip utilities)
+- libdrm-cursor (HW cursor)
