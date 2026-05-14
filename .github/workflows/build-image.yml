@@ -149,6 +149,7 @@ jobs:
           retention-days: 7
 
       - name: Create/Update Release
+        if: success()
         uses: softprops/action-gh-release@v2
         with:
           name: "Ubuntu ${{ steps.select.outputs.series }} for RK3576"
