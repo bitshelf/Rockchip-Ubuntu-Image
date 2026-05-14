@@ -257,7 +257,7 @@ run_ubuntu_image() {
 verify_image() {
     info "Verifying image..."
 
-    local img="${ARTIFACTS_DIR}/ubuntu-24.04-preinstalled-server-arm64+myd-lr3576.img"
+    local img="${ARTIFACTS_DIR}/ubuntu-24.04-preinstalled-server-arm64+rk3576.img"
 
     # Partition table
     info "Partition layout:"
@@ -374,7 +374,7 @@ main() {
 
     echo ""
     info "Build complete!"
-    info "Image: ${ARTIFACTS_DIR}/ubuntu-24.04-preinstalled-server-arm64+myd-lr3576.img.xz"
+    info "Image: ${ARTIFACTS_DIR}/ubuntu-24.04-preinstalled-server-arm64+rk3576.img.xz"
 }
 
 main "$@"

@@ -97,8 +97,7 @@ jobs:
 
       - name: Run Ubuntu official test suite
         run: |
-          cd ubuntu
-          sudo bash tests/qemu-test.sh
+          sudo ARTIFACTS_DIR=ubuntu/artifacts bash tests/qemu-test.sh
 
       - name: Upload rootfs artifact
         uses: actions/upload-artifact@v6
