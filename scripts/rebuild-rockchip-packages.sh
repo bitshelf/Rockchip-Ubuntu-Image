@@ -17,7 +17,7 @@
 # ==========================================================================
 set -euo pipefail
 
-SDK_PATCHES="${SDK_PATCHES:-/media/loh/rockchip/lr3576_v2/debian/packages-patches}"
+PATCHES_DIR="$(cd "$(dirname "$0")/.." && pwd)/patches"
 OUTPUT_DEBS="${OUTPUT_DEBS:-$(cd "$(dirname "$0")/.." && pwd)/ubuntu/rockchip-debs}"
 WORK_DIR="${WORK_DIR:-/tmp/rockchip-rebuild}"
 UBUNTU_SERIES="${UBUNTU_SERIES:-noble}"
@@ -60,7 +60,7 @@ rebuild_package() {
     info "  Source: $src_dir"
 
     # Step 2: Apply Rockchip patches
-    local patches="${SDK_PATCHES}/${patch_dir}"
+    local patches="${PATCHES_DIR}/${patch_dir}"
     if [[ ! -d "$patches" ]]; then
         warn "  No patches at $patches, skipping patch step"
     else
@@ -108,7 +108,7 @@ rebuild_package() {
 # ==========================================================================
 
 info "Starting Rockchip package rebuild for Ubuntu $UBUNTU_SERIES"
-info "Patches: $SDK_PATCHES"
+info "Patches: $PATCHES_DIR"
 info "Output:  $OUTPUT_DEBS"
 echo ""
 
