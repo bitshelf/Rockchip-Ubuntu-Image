@@ -1,11 +1,14 @@
 #!/bin/bash
 # ==========================================================================
-# rebuild-rockchip-packages.sh — Apply Rockchip SDK patches to Ubuntu pkgs
+# rebuild-rockchip-packages.sh — Apply Rockchip patches, cross-build for arm64
+#
+# Uses Ubuntu official cross-compilation: sbuild --host=arm64 with QEMU chroot
+# or dpkg-buildpackage -aarm64 for packages supporting cross-build.
 #
 # Workflow per package:
 #   1. Get Ubuntu source: apt-get source <package>
-#   2. Apply Rockchip patches from SDK
-#   3. Build .deb: dpkg-buildpackage
+#   2. Apply Rockchip patches from patches/userland/
+#   3. Cross-build .deb for arm64: sbuild --host=arm64
 #   4. Copy .deb to ubuntu/rockchip-debs/
 #
 # Package build order (dependency-aware):
@@ -83,13 +86,27 @@ rebuild_package() {
         cd "$build_dir"
     fi
 
-    # Step 3: Build
-    info "  Building..."
+    # Step 3: Cross-build for arm64 (Ubuntu official method)
+    info "  Cross-building for arm64..."
     cd "$src_dir"
-    if dpkg-buildpackage -us -uc -b -j$(nproc) 2>&1 | tail -5; then
-        info "  Build succeeded"
-    else
-        error "  Build failed for $name"
+
+    # Use sbuild with QEMU arm64 chroot (preferred) or dpkg-buildpackage -aarm64
+    if command -v sbuild &>/dev/null; then
+        info "    Using sbuild --host=arm64"
+        sbuild --host=arm64 --arch=amd64 -d noble --no-run-lintian 2>&1 | tail -5 || \
+            warn "sbuild failed, trying dpkg-buildpackage fallback"
+    fi
+
+    # Fallback: direct cross-build
+    if ! ls ../*.deb 2>/dev/null | grep -q .; then
+        info "    Using dpkg-buildpackage -aarm64"
+        CONFIG_SITE=/etc/dpkg-cross/cross-config.arm64 \
+            dpkg-buildpackage -aarm64 -d -us -uc -b -j$(nproc) 2>&1 | tail -10 || {
+            warn "    Cross-build failed for $name (some packages don't cross-compile)"
+            warn "    Rebuild on native arm64 host or use sbuild QEMU chroot"
+            cd "$build_dir"
+            return 1
+        }
     fi
     cd "$build_dir"
 
