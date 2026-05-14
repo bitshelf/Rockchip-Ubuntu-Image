@@ -34,6 +34,12 @@ source "${BOARD_CONF}"
 UBUNTU_SERIES="${UBUNTU_SERIES:-${UBUNTU_SERIES_DEFAULT}}"
 
 # Sources resolved via board config URIs (file://, https://, git://)
+# Mirror: auto-detect local apt-cacher-ng cache for faster builds
+RESOLVE_MIRROR="${PROJECT_DIR}/scripts/resolve-mirror.sh"
+APT_MIRROR="${UBUNTU_MIRROR}"
+if [[ -x "${RESOLVE_MIRROR}" ]]; then
+    APT_MIRROR=$("${RESOLVE_MIRROR}")
+fi
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -216,8 +222,19 @@ run_ubuntu_image() {
 
     mkdir -p "${ARTIFACTS_DIR}"
 
+    # Select YAML based on Ubuntu series
+    local yaml_file="${SCRIPT_DIR}/image-definition.yaml"
+    if [[ "${UBUNTU_SERIES}" == "questing" ]]; then
+        yaml_file="${SCRIPT_DIR}/image-definition-questing.yaml"
+    fi
+
+    # Generate temporary YAML with resolved mirror
+    local tmp_yaml="${ARTIFACTS_DIR}/image-definition-resolved.yaml"
+    sed "s|mirror:.*|mirror: \"${APT_MIRROR}\"|" "${yaml_file}" > "${tmp_yaml}"
+    info "Mirror: ${APT_MIRROR}"
+
     sudo /snap/bin/ubuntu-image classic \
-        --image-definition "${SCRIPT_DIR}/image-definition.yaml" \
+        --image-definition "${tmp_yaml}" \
         --output-dir "${ARTIFACTS_DIR}" \
         -d 2>&1 | tee "${ARTIFACTS_DIR}/ubuntu-image.log"
 
