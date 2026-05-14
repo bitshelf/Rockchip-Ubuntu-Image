@@ -66,3 +66,16 @@ BootROM → idbloader (LBA 64) → U-Boot (LBA 16384) → boot.img (FIT: kernel+
 ## SDK 依赖
 
 RK3576 SDK 路径通过环境变量 `SDK_PATH` 配置，默认为 `/media/loh/rockchip/lr3576_v2/`。
+
+## 扩展到其他 SoC
+
+```bash
+# 1. 复制板子配置
+cp boards/board-template.conf boards/orangepi5.conf
+# 2. 编辑配置
+vim boards/orangepi5.conf
+# 3. 构建
+BOARD=orangepi5 ./build.sh
+```
+
+详见 [SoC 移植指南](docs/PORTING.md) 和 [架构文档](docs/ARCHITECTURE.md)。

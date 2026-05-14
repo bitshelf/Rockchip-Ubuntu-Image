@@ -2,17 +2,36 @@
 set -euo pipefail
 
 # ==========================================================================
-# build.sh — MYiR MYD-LR3576 Ubuntu 24.04 Image Build Orchestrator
+# build.sh — Ubuntu Image Build Orchestrator (multi-board)
+#
+# Usage:  BOARD=orangepi5 ./build.sh
+#         BOARD=myd-lr3576 UBUNTU_SERIES=questing ./build.sh
 #
 # Prerequisites:
-#   - ubuntu-image snap (v3.x): sudo snap install ubuntu-image --classic
+#   - ubuntu-image snap (v3.x) or built from Go source
 #   - qemu-user-static + binfmt-support for arm64 cross-build
 #   - sgdisk (gdisk package)
-#   - RK3576 SDK at SDK_PATH with built kernel, U-Boot, and Rockchip packages
+#   - SDK at SDK_PATH with built kernel, U-Boot, and packages
 # ==========================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(dirname "${SCRIPT_DIR}")"
 ARTIFACTS_DIR="${SCRIPT_DIR}/artifacts"
+
+# Board selection (default: myd-lr3576)
+BOARD="${BOARD:-myd-lr3576}"
+BOARD_CONF="${PROJECT_DIR}/boards/${BOARD}.conf"
+
+if [[ ! -f "${BOARD_CONF}" ]]; then
+    echo "ERROR: Board config not found: ${BOARD_CONF}"
+    echo "Available boards:"
+    ls "${PROJECT_DIR}/boards/"*.conf 2>/dev/null | sed 's/.*\///;s/\.conf//' | sed 's/^/  /'
+    exit 1
+fi
+source "${BOARD_CONF}"
+
+# Ubuntu series (default from board config)
+UBUNTU_SERIES="${UBUNTU_SERIES:-${UBUNTU_SERIES_DEFAULT}}"
 
 # SDK location (configurable via environment)
 SDK_PATH="${SDK_PATH:-/media/loh/rockchip/lr3576_v2}"
@@ -63,38 +82,38 @@ copy_boot_assets() {
     local boot_assets="${SCRIPT_DIR}/boot-assets"
 
     # idbloader (SPL + DDR init)
-    if [[ -f "${sdk_uboot}/rk3576_spl_loader_v1.09.108.bin" ]]; then
-        cp -v "${sdk_uboot}/rk3576_spl_loader_v1.09.108.bin" "${boot_assets}/idbloader.img"
+    if [[ -f "${sdk_uboot}/${IDBLOADER_SOURCE}" ]]; then
+        cp -v "${sdk_uboot}/${IDBLOADER_SOURCE}" "${boot_assets}/idbloader.img"
     elif [[ -f "${sdk_output}/MiniLoaderAll.bin" ]]; then
         cp -v "${sdk_output}/MiniLoaderAll.bin" "${boot_assets}/idbloader.img"
     else
-        warn "idbloader not found in SDK, build U-Boot first"
+        warn "idbloader (${IDBLOADER_SOURCE}) not found"
     fi
 
     # u-boot.itb
-    if [[ -f "${sdk_uboot}/uboot.img" ]]; then
-        cp -v "${sdk_uboot}/uboot.img" "${boot_assets}/u-boot.itb"
-    elif [[ -f "${sdk_output}/uboot.img" ]]; then
-        cp -v "${sdk_output}/uboot.img" "${boot_assets}/u-boot.itb"
+    if [[ -f "${sdk_uboot}/${UBOOT_SOURCE}" ]]; then
+        cp -v "${sdk_uboot}/${UBOOT_SOURCE}" "${boot_assets}/u-boot.itb"
+    elif [[ -f "${sdk_output}/${UBOOT_SOURCE}" ]]; then
+        cp -v "${sdk_output}/${UBOOT_SOURCE}" "${boot_assets}/u-boot.itb"
     else
-        warn "uboot.img not found in SDK, build U-Boot first"
+        warn "u-boot (${UBOOT_SOURCE}) not found"
     fi
 
     # boot.img (kernel FIT image)
-    if [[ -f "${sdk_output}/boot.img" ]]; then
-        cp -v "${sdk_output}/boot.img" "${boot_assets}/boot.img"
-    elif [[ -f "${sdk_kernel}/boot.img" ]]; then
-        cp -v "${sdk_kernel}/boot.img" "${boot_assets}/boot.img"
+    if [[ -f "${sdk_output}/${BOOTIMG_SOURCE}" ]]; then
+        cp -v "${sdk_output}/${BOOTIMG_SOURCE}" "${boot_assets}/boot.img"
+    elif [[ -f "${sdk_kernel}/${BOOTIMG_SOURCE}" ]]; then
+        cp -v "${sdk_kernel}/${BOOTIMG_SOURCE}" "${boot_assets}/boot.img"
     else
-        warn "boot.img not found in SDK, build kernel first"
+        warn "boot.img (${BOOTIMG_SOURCE}) not found"
     fi
 
     # Device tree
-    local dtb_path="${sdk_kernel}/arch/arm64/boot/dts/rockchip/myd-lr3576.dtb"
+    local dtb_path="${sdk_kernel}/${OVERLAY_SOURCE_DIR}/${DTB_BASE}"
     if [[ -f "${dtb_path}" ]]; then
-        cp -v "${dtb_path}" "${boot_assets}/myd-lr3576.dtb"
+        cp -v "${dtb_path}" "${boot_assets}/"
     else
-        warn "myd-lr3576.dtb not found in SDK"
+        warn "${DTB_BASE} not found at ${dtb_path}"
     fi
 
     # DTS overlays
