@@ -30,7 +30,7 @@ jobs:
   build-rootfs:
     name: Build ${{ inputs.ubuntu_series || 'noble' }} rootfs
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    timeout-minutes: 360
 
     steps:
       - name: Checkout
