@@ -1,4 +1,4 @@
-name: Build Ubuntu Image for MYD-LR3576
+name: Build Ubuntu Image for RK3576
 
 on:
   push:
@@ -28,13 +28,12 @@ env:
 
 jobs:
   # =========================================================================
-  # Build rootfs on amd64 host with QEMU arm64 cross-build
-  # (ubuntu-24.04-arm runner not yet available for all repos)
+  # Build rootfs on native ARM64 runner (no QEMU, no cross-compile)
   # =========================================================================
   build-rootfs:
-    name: Build ${{ inputs.ubuntu_series || 'noble' }} rootfs
-    runs-on: ubuntu-24.04
-    timeout-minutes: 360
+    name: Build ${{ inputs.ubuntu_series || 'noble' }} rootfs (arm64 native)
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 120
 
     steps:
       - name: Checkout
@@ -44,12 +43,10 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq \
-            qemu-user-static binfmt-support \
             debootstrap germinate \
             gdisk e2fsprogs xz-utils dosfstools \
             u-boot-tools device-tree-compiler \
             golang-go git
-          sudo systemctl restart systemd-binfmt
 
       - name: Build ubuntu-image from source
         run: |
@@ -59,7 +56,7 @@ jobs:
           cd /tmp/ubuntu-image-src
           go build -o ubuntu-image ./cmd/ubuntu-image
           sudo cp ubuntu-image /usr/local/bin/ubuntu-image
-          echo "ubuntu-image built successfully"
+          ubuntu-image --version
 
       - name: Select image definition
         id: select
@@ -74,7 +71,7 @@ jobs:
             echo "img_prefix=ubuntu-24.04" >> $GITHUB_OUTPUT
           fi
 
-      - name: Run ubuntu-image (until install_packages)
+      - name: Build rootfs with ubuntu-image
         run: |
           cd ubuntu
           mkdir -p artifacts
@@ -82,40 +79,6 @@ jobs:
             "${{ steps.select.outputs.def_file }}" \
             --output-dir artifacts/ \
             --workdir /tmp/ui-work \
-            --until install_packages \
-            2>&1 | tee artifacts/ubuntu-image-step1.log
-
-      - name: Patch chroot (QEMU + snap workarounds)
-        run: |
-          # 1. Use dpkg-divert to permanently replace py3compile with no-op
-          # Regular file overwrite gets undone when python3-minimal is installed
-          sudo chroot /tmp/ui-work/chroot dpkg-divert --local --rename --add /usr/bin/py3compile 2>/dev/null || true
-          sudo bash -c 'cat > /tmp/ui-work/chroot/usr/bin/py3compile << "EOF"
-          #!/bin/bash
-          exit 0
-          EOF'
-          sudo chmod +x /tmp/ui-work/chroot/usr/bin/py3compile
-          sudo chroot /tmp/ui-work/chroot dpkg-divert --local --rename --add /usr/bin/py3clean 2>/dev/null || true
-          sudo bash -c 'cat > /tmp/ui-work/chroot/usr/bin/py3clean << "EOF"
-          #!/bin/bash
-          exit 0
-          EOF'
-          sudo chmod +x /tmp/ui-work/chroot/usr/bin/py3clean
-          echo "py3compile permanently patched via dpkg-divert"
-
-          # 2. Purge snapd to prevent snap-preseed failure
-          sudo chroot /tmp/ui-work/chroot apt-get purge -y -qq snapd 2>/dev/null || true
-          sudo chroot /tmp/ui-work/chroot apt-get autopurge -y -qq 2>/dev/null || true
-          echo "snapd purged from chroot"
-
-      - name: Resume ubuntu-image classic
-        run: |
-          cd ubuntu
-          sudo /usr/local/bin/ubuntu-image classic \
-            "${{ steps.select.outputs.def_file }}" \
-            --output-dir artifacts/ \
-            --workdir /tmp/ui-work \
-            --resume \
             2>&1 | tee artifacts/ubuntu-image.log
 
       - name: Verify rootfs tarball

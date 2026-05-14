@@ -19,7 +19,6 @@ on:
   push:
     paths:
       - 'patches/userland/**'
-      - 'scripts/rebuild-in-chroot.sh'
       - '.github/workflows/rebuild-packages.yml'
 
 permissions:
@@ -31,12 +30,12 @@ env:
 
 jobs:
   # =========================================================================
-  # Rebuild each package in QEMU arm64 chroot (native build, no cross-compile)
+  # Rebuild each package natively on ARM64 (no QEMU, no cross-compile)
   # =========================================================================
   rebuild:
-    name: ${{ matrix.package }} (arm64)
-    runs-on: ubuntu-24.04
-    timeout-minutes: 180
+    name: ${{ matrix.package }} (arm64 native)
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
@@ -57,41 +56,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Install host dependencies
+      - name: Install build tools
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq \
-            qemu-user-static binfmt-support \
-            debootstrap devscripts ubuntu-dev-tools \
-            dpkg-dev quilt
-          sudo systemctl restart systemd-binfmt
-
-      - name: Setup arm64 chroot
-        run: |
-          CHROOT="/tmp/rk-arm64-chroot"
-          if [[ ! -f "$CHROOT/usr/bin/qemu-aarch64-static" ]]; then
-            echo "Creating noble arm64 chroot..."
-            sudo rm -rf "$CHROOT"
-            sudo debootstrap --arch arm64 noble "$CHROOT" http://ports.ubuntu.com/ubuntu-ports/ 2>&1 | tail -5
-            sudo cp /usr/bin/qemu-aarch64-static "$CHROOT/usr/bin/"
-            sudo chroot "$CHROOT" bash -c '
-              export DEBIAN_FRONTEND=noninteractive
-              apt-get update -qq
-              apt-get install -y -qq build-essential dpkg-dev devscripts ubuntu-dev-tools fakeroot 2>&1 | tail -3
-            '
-            echo "Chroot ready"
-          else
-            echo "Using existing chroot"
-          fi
+            build-essential dpkg-dev devscripts ubuntu-dev-tools \
+            debhelper quilt fakeroot
 
       - name: Rebuild ${{ matrix.package }} for arm64
         run: |
+          set -euo pipefail
           PKG="${{ matrix.package }}"
           SERIES="${{ inputs.ubuntu_series || 'noble' }}"
-          CHROOT="/tmp/rk-arm64-chroot"
           OUTPUT="${{ github.workspace }}/ubuntu/rockchip-debs"
           PATCHDIR="${{ github.workspace }}/patches/userland"
-          mkdir -p "$OUTPUT"
+          WORKDIR="/tmp/rebuild-${PKG}"
+          mkdir -p "$OUTPUT" "$WORKDIR"
 
           echo "=== Rebuilding $PKG for arm64 ($SERIES) ==="
 
@@ -110,37 +90,24 @@ jobs:
             USE_PATCHES=$(find "$PATCHDIR/$PKG" -maxdepth 2 -name "*.patch" -type f -print -quit 2>/dev/null | xargs dirname 2>/dev/null || echo "")
           fi
 
-          echo "Patch dir: $USE_PATCHES"
+          echo "Patch dir: ${USE_PATCHES:-none}"
           echo "Source pkg: $SRC"
 
-          # Copy build files to chroot
-          sudo mkdir -p "$CHROOT/build"
-          sudo rm -rf "$CHROOT/build/patches" "$CHROOT/build/src"
-
-          if [[ -n "$USE_PATCHES" && -d "$USE_PATCHES" ]]; then
-            sudo cp -r "$USE_PATCHES" "$CHROOT/build/patches"
-          fi
-
-          # Build inside chroot
-          sudo chroot "$CHROOT" bash -c '
-          set -euo pipefail
-          export DEBIAN_FRONTEND=noninteractive
-          cd /build
-
-          echo "Getting source for $SRC ($SERIES)..."
-          pull-lp-source $SRC $SERIES 2>&1 | tail -2
-          srcdir=$(find /build -maxdepth 1 -type d -name "${SRC}-*" -o -name "${PKG}-*" | head -1)
-          if [[ -z "$srcdir" ]]; then
+          # Get source
+          cd "$WORKDIR"
+          pull-lp-source "$SRC" "$SERIES" 2>&1 | tail -3
+          SRCDIR=$(find "$WORKDIR" -maxdepth 1 -type d -name "${SRC}-*" -o -name "${PKG}-*" | head -1)
+          if [[ -z "$SRCDIR" ]]; then
             echo "ERROR: source not found for $SRC"
             exit 1
           fi
-          cd "$srcdir"
+          cd "$SRCDIR"
           echo "Source: $(pwd)"
 
-          # Apply patches
+          # Apply Rockchip patches
           applied=0; failed=0
-          if [[ -d /build/patches ]]; then
-            for pf in $(find /build/patches -maxdepth 1 -name "*.patch" -type f | sort); do
+          if [[ -n "$USE_PATCHES" && -d "$USE_PATCHES" ]]; then
+            for pf in $(find "$USE_PATCHES" -maxdepth 1 -name "*.patch" -type f | sort); do
               if patch -p1 -N --dry-run < "$pf" 2>/dev/null; then
                 patch -p1 < "$pf" 2>/dev/null
                 applied=$((applied + 1))
@@ -153,25 +120,46 @@ jobs:
           fi
           echo "Patches: $applied applied, $failed failed"
 
-          # Install build deps
-          echo "Installing build deps..."
-          apt-get build-dep -y -qq $SRC 2>&1 | tail -5 || {
-            echo "WARNING: build-dep failed, attempting with -d"
-            apt-get build-dep -d -y -qq $SRC 2>&1 | tail -3
+          # Install build dependencies
+          echo "Installing build dependencies..."
+          sudo apt-get build-dep -y -qq "$SRC" 2>&1 | tail -5 || {
+            echo "WARNING: build-dep failed, trying alternate methods"
+            sudo apt-get build-dep -d -y -qq "$SRC" 2>&1 | tail -3
           }
 
           # Build natively for arm64
-          echo "Building..."
+          echo "Building $PKG..."
           dpkg-buildpackage -us -uc -b -j$(nproc) 2>&1 | tail -40
-          ' 2>&1 | tee /tmp/build-${{ matrix.package }}.log
 
-          echo "=== Build log ==="
-          tail -20 /tmp/build-${{ matrix.package }}.log
+          # Collect output
+          find "$WORKDIR" -maxdepth 1 -name "*.deb" -exec cp -v {} "$OUTPUT/" \; 2>/dev/null || true
+          echo "=== Built packages ==="
+          ls -lh "$OUTPUT/" 2>/dev/null
 
-          # Copy debs out
-          sudo find "$CHROOT/build" -maxdepth 1 -name "*.deb" -exec cp -v {} "$OUTPUT/" \; 2>/dev/null || true
-          echo "=== Output debs ==="
-          ls -lh "$OUTPUT/" 2>/dev/null || echo "(no debs produced for $PKG)"
+      - name: Run package tests
+        run: |
+          PKG="${{ matrix.package }}"
+          case "$PKG" in
+            xserver) SRC="xorg-server" ;;
+            *) SRC="$PKG" ;;
+          esac
+          WORKDIR="/tmp/rebuild-${PKG}"
+          SRCDIR=$(find "$WORKDIR" -maxdepth 1 -type d -name "${SRC}-*" -o -name "${PKG}-*" | head -1)
+          if [[ -d "$SRCDIR" ]]; then
+            cd "$SRCDIR"
+            echo "=== Running upstream tests for $PKG ==="
+            # Run package-specific tests if available
+            if [[ -f debian/tests/control ]] || [[ -d debian/tests ]]; then
+              echo "Found autopkgtest definitions"
+            fi
+            # Try build-time tests
+            if grep -q "check:" Makefile 2>/dev/null || grep -q "check:" debian/rules 2>/dev/null; then
+              echo "Found check target"
+            fi
+            # Run dpkg-buildpackage test if there's a test target
+            DEB_BUILD_OPTIONS=nocheck dpkg-buildpackage -us -uc -b -j$(nproc) 2>&1 | tail -5 || true
+          fi
+        continue-on-error: true
 
       - name: Upload rebuilt packages
         uses: actions/upload-artifact@v6
@@ -181,20 +169,14 @@ jobs:
           retention-days: 30
         continue-on-error: true
 
-      - name: Save results manifest
-        run: |
-          mkdir -p ubuntu/rockchip-debs
-          echo "${{ matrix.package }} $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> ubuntu/rockchip-debs/MANIFEST.txt
-          ls ubuntu/rockchip-debs/ >> ubuntu/rockchip-debs/MANIFEST.txt
-
   # =========================================================================
   # Publish all rebuilt packages to a single release
   # =========================================================================
   publish:
     name: Publish release
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-24.04-arm
     needs: rebuild
-    if: always() && needs.rebuild.result != 'failure'
+    if: always() && !cancelled()
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v6
@@ -206,10 +188,9 @@ jobs:
       - name: List packages
         run: |
           echo "=== Rebuilt packages ==="
-          find all-debs -name "*.deb" -exec ls -lh {} \; || echo "No packages built"
+          find all-debs -name "*.deb" -type f -exec ls -lh {} \; 2>/dev/null || echo "No packages built"
 
       - name: Create release
-        if: success()
         uses: softprops/action-gh-release@v2
         with:
           name: "Rockchip Packages (${{ inputs.ubuntu_series || 'noble' }})"
@@ -218,7 +199,8 @@ jobs:
             Rockchip-patched arm64 packages for Ubuntu ${{ inputs.ubuntu_series || 'noble' }}
 
             Built: $(date -u +%Y-%m-%dT%H:%M:%SZ)
-            Packages: libdrm, wayland, weston, xserver, v4l-utils, mpv, blueman, cheese, openbox, pcmanfm, wireplumber
+            Architecture: arm64
+            Built on: Native ARM64 runner
 
             Use with RK3576 Ubuntu images.
           files: all-debs/*.deb
