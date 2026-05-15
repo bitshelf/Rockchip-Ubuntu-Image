@@ -150,24 +150,56 @@ jobs:
           cat "${TMP_YAML}"
           echo ""
 
-          echo "=== Running ubuntu-image classic ==="
-          # Run ubuntu-image; capture exit code manually so we can
-          # upload the log artifact even on failure.
-          set +e
-          # Verify QEMU arm64 binfmt is properly registered
           echo "=== QEMU binfmt status ===" >> "${LOG}"
           ls -la /proc/sys/fs/binfmt_misc/qemu-aarch64 2>&1 >> "${LOG}" || true
           update-binfmts --display qemu-aarch64 2>&1 >> "${LOG}" || true
 
-          # Use --workdir in workspace to avoid /tmp noexec/nodev issue
+          echo "=== Stage 1: build chroot, stop before package install ==="
+          # Two-stage build per BUILD.md: stop before install_packages
+          # to patch py3compile (prevents QEMU hangs during python bytecode).
           UI_WORKDIR="${ARTIFACTS}/work"
           mkdir -p "${UI_WORKDIR}"
+          set +e
           sudo /snap/bin/ubuntu-image classic \
             --workdir "${UI_WORKDIR}" \
+            --until install_packages \
             "${TMP_YAML}" \
             -O "${ARTIFACTS}" \
             --debug 2>&1 | tee -a "${LOG}"
-          echo "--- end of log ---" >> "${LOG}"
+          S1_EXIT=${PIPESTATUS[0]}
+          set -e
+          echo "Stage 1 exit: ${S1_EXIT}" | tee -a "${LOG}"
+          if [[ ${S1_EXIT} -ne 0 ]]; then
+            echo "## Stage 1 FAILED (exit ${S1_EXIT})" >> "${GITHUB_STEP_SUMMARY}"
+            echo '```' >> "${GITHUB_STEP_SUMMARY}"
+            tail -50 "${LOG}" >> "${GITHUB_STEP_SUMMARY}"
+            echo '```' >> "${GITHUB_STEP_SUMMARY}"
+            tail -50 "${LOG}"
+            exit 1
+          fi
+
+          echo "=== Patching py3compile to prevent QEMU hangs ==="
+          CHROOT=$(find "${UI_WORKDIR}" -name chroot -type d 2>/dev/null | head -1)
+          if [[ -n "${CHROOT}" ]]; then
+            sudo tee "${CHROOT}/usr/bin/py3compile" <<<'#!/bin/bash
+          exit 0' > /dev/null
+            sudo chmod +x "${CHROOT}/usr/bin/py3compile"
+            sudo tee "${CHROOT}/usr/bin/py3clean" <<<'#!/bin/bash
+          exit 0' > /dev/null
+            sudo chmod +x "${CHROOT}/usr/bin/py3clean"
+            echo "py3compile patched" | tee -a "${LOG}"
+          else
+            echo "WARNING: chroot not found at ${UI_WORKDIR}" | tee -a "${LOG}"
+          fi
+
+          echo "=== Stage 2: install packages and complete build ==="
+          set +e
+          sudo /snap/bin/ubuntu-image classic \
+            --workdir "${UI_WORKDIR}" \
+            --resume \
+            "${TMP_YAML}" \
+            -O "${ARTIFACTS}" \
+            --debug 2>&1 | tee -a "${LOG}"
           UI_EXIT_CODE=${PIPESTATUS[0]}
           set -e
           echo "ubuntu-image exit code: ${UI_EXIT_CODE}"
