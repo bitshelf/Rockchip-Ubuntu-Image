@@ -92,7 +92,7 @@ Ref: `canonical/ubuntu-image` `internal/imagedefinition/README.rst`
 - **Recommended** for production builds
 
 ### GitHub Actions
-- **amd64 runner** (`ubuntu-24.04`): QEMU cross-build (360 min timeout)
+- **amd64 runner** (`ubuntu-22.04`): QEMU cross-build (avoids LP:#1886758, GHA #11662 QEMU segfault)
 - **ARM64 runner** (`self-hosted` ARM64): Native build (fast, ~20 min)
 - Set `RUNNER_LABEL= self-hosted` in repo Variables for ARM64 runner
 
@@ -133,7 +133,8 @@ Ref: `canonical/ubuntu-image` `internal/imagedefinition/README.rst`
 
 ## CI (GitHub Actions)
 
-- Runner: `ubuntu-24.04` (amd64+QEMU) or `self-hosted` ARM64
+- Runner: `ubuntu-22.04` (amd64+QEMU) — 22.04 avoids QEMU segfault on newer kernels (GHA #11662)
+  Fallback: `ubuntu-24.04` or `self-hosted` ARM64
 - ubuntu-image: installed via `snap install ubuntu-image --classic` (not built from Go source)
 - Upload: rootfs.tar.gz + manifest + filelist + ubuntu-image.log (always)
 - Retention: 3d log, 7d rootfs

@@ -37,7 +37,7 @@ jobs:
   # =========================================================================
   build-rootfs:
     name: Build ${{ inputs.ubuntu_series || 'noble' }} rootfs
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
     timeout-minutes: 180
 
     steps:
