@@ -182,10 +182,13 @@ jobs:
             echo "=== ubuntu-image FAILED (exit code: ${UI_EXIT_CODE}) ==="
             echo "=== Last 100 lines of log ==="
             tail -100 "${LOG}" || true
-            # Emit as workflow annotations for visibility
-            while IFS= read -r line; do
-              [[ -n "${line}" ]] && echo "::error::${line}"
-            done < <(tail -20 "${LOG}" 2>/dev/null)
+            # Write to step summary (visible on run page without auth)
+            {
+              echo "## ubuntu-image Failed (exit code: ${UI_EXIT_CODE})"
+              echo '```'
+              tail -50 "${LOG}" 2>/dev/null
+              echo '```'
+            } >> "${GITHUB_STEP_SUMMARY}"
             exit 1
           else
             echo "ERROR: rootfs.tar.gz not found in output!"
