@@ -49,27 +49,21 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq \
             qemu-user-static binfmt-support \
+            debootstrap germinate \
             gdisk e2fsprogs xz-utils dosfstools \
             u-boot-tools device-tree-compiler \
-            snapd
+            golang-go git
           sudo systemctl restart systemd-binfmt
 
-          # Start snapd and wait for it
-          sudo systemctl enable --now snapd
-          echo "Waiting for snapd to be ready..."
-          for i in $(seq 1 60); do
-            if snap version >/dev/null 2>&1; then
-              echo "snapd ready after ${i}s"
-              break
-            fi
-            sleep 1
-          done
-          snap version
-
-          # Install ubuntu-image classic snap
-          sudo snap install ubuntu-image --classic
-          echo "ubuntu-image snap installed:"
-          /snap/bin/ubuntu-image classic --help 2>&1 | head -3 || true
+      - name: Build ubuntu-image from source
+        run: |
+          # Clone and build ubuntu-image (avoids snap issues)
+          git clone --depth 1 https://github.com/canonical/ubuntu-image.git /tmp/ubuntu-image
+          cd /tmp/ubuntu-image
+          go build -o ubuntu-image ./cmd/ubuntu-image
+          sudo cp ubuntu-image /usr/local/bin/ubuntu-image
+          /usr/local/bin/ubuntu-image --version
+          echo "ubuntu-image built from source"
 
       - name: Select config
         id: select
@@ -163,7 +157,7 @@ jobs:
           UI_WORKDIR="${ARTIFACTS}/work"
           mkdir -p "${UI_WORKDIR}"
           set +e
-          sudo /snap/bin/ubuntu-image classic \
+          sudo /usr/local/bin/ubuntu-image classic \
             --workdir "${UI_WORKDIR}" \
             --until install_packages \
             "${TMP_YAML}" \
@@ -199,7 +193,7 @@ jobs:
 
           echo "=== Stage 2: install packages and complete build ==="
           set +e
-          sudo /snap/bin/ubuntu-image classic \
+          sudo /usr/local/bin/ubuntu-image classic \
             --workdir "${UI_WORKDIR}" \
             --resume \
             "${TMP_YAML}" \
