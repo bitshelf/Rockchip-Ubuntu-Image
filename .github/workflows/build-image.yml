@@ -52,18 +52,25 @@ jobs:
             debootstrap germinate \
             gdisk e2fsprogs xz-utils dosfstools \
             u-boot-tools device-tree-compiler \
-            golang-go git
+            git
           sudo systemctl restart systemd-binfmt
+
+      - name: Install Go (ubuntu-image requires >=1.25)
+        run: |
+          # noble has golang 1.22 — ubuntu-image go.mod requires 1.25
+          GO_VER=1.25.0
+          curl -sL "https://go.dev/dl/go${GO_VER}.linux-amd64.tar.gz" -o /tmp/go.tar.gz
+          sudo tar -C /usr/local -xzf /tmp/go.tar.gz
+          echo "/usr/local/go/bin" >> $GITHUB_PATH
+          /usr/local/go/bin/go version
 
       - name: Build ubuntu-image from source
         run: |
-          # Clone and build ubuntu-image (avoids snap issues)
           git clone --depth 1 https://github.com/canonical/ubuntu-image.git /tmp/ubuntu-image
           cd /tmp/ubuntu-image
           go build -o ubuntu-image ./cmd/ubuntu-image
           sudo cp ubuntu-image /usr/local/bin/ubuntu-image
           /usr/local/bin/ubuntu-image --version
-          echo "ubuntu-image built from source"
 
       - name: Select config
         id: select
