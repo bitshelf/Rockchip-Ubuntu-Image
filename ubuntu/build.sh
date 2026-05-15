@@ -94,6 +94,9 @@ check_prereqs() {
     command -v /snap/bin/ubuntu-image >/dev/null 2>&1 || \
         error "ubuntu-image not found. Install: sudo snap install ubuntu-image --classic"
 
+    command -v debootstrap >/dev/null 2>&1 || \
+        error "debootstrap not found. Install: sudo apt-get install debootstrap"
+
     command -v sgdisk >/dev/null 2>&1 || \
         error "sgdisk not found. Install: sudo apt-get install gdisk"
 
