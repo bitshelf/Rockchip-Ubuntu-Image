@@ -1,0 +1,88 @@
+name: ubuntu-server-rk3576-arm64-questing
+display-name: Ubuntu Server Rockchip RK3576 arm64 (26.04 Questing)
+revision: 1
+architecture: arm64
+series: questing
+class: preinstalled
+kernel: linux-image-generic
+
+# No gadget section — disk assembly handled by assemble-disk.sh
+
+rootfs:
+  components:
+    - main
+    - restricted
+    - universe
+    - multiverse
+  archive: ubuntu
+  mirror: "http://ports.ubuntu.com/ubuntu-ports/"
+  sources-list-deb822: true
+  seed:
+    # Local file:// git repo (first) provides STRUCTURE + blacklist overrides.
+    # Launchpad (second) resolves platform.questing included by STRUCTURE.
+    urls:
+      - "SEED_URL_PLACEHOLDER"
+    branch: questing
+    vcs: true
+    names:
+      - server-minimal
+      - server
+
+customization:
+  cloud-init:
+    user-data: |
+      #cloud-config
+      chpasswd:
+        expire: true
+        users:
+          - name: ubuntu
+            password: ubuntu
+            type: text
+  extra-packages:
+    - name: u-boot-tools
+    - name: device-tree-compiler
+    - name: dosfstools
+    - name: parted
+    - name: e2fsprogs
+    - name: network-manager
+    - name: openssh-server
+    - name: ethtool
+    - name: iw
+    - name: wpasupplicant
+    - name: vim
+    - name: htop
+    - name: usbutils
+    - name: pciutils
+    - name: lshw
+    - name: linux-firmware
+    - name: build-essential
+    - name: flex
+    - name: bison
+    - name: language-pack-en-base
+    - name: language-pack-zh-hans-base
+  fstab:
+    - label: "boot"
+      mountpoint: "/boot"
+      filesystem-type: "ext4"
+      dump: false
+      fsck-order: 1
+    - label: "overlay"
+      mountpoint: "/overlay"
+      filesystem-type: "ext4"
+      dump: false
+      fsck-order: 2
+  manual:
+    make-dirs:
+      - path: /ro
+        permissions: 0755
+      - path: /overlay
+        permissions: 0755
+
+artifacts:
+  rootfs-tarball:
+    name: rootfs.tar.gz
+    compression: gzip
+  manifest:
+    name: ubuntu-26.04-preinstalled-server-arm64+rk3576.manifest
+  filelist:
+    name: ubuntu-26.04-preinstalled-server-arm64+rk3576.filelist

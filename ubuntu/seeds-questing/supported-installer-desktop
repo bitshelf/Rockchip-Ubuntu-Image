@@ -1,0 +1,6 @@
+= Installer =
+
+ * casper # needed by live CD build system
+ * lupin-casper [amd64 i386] # ditto, installer-for-windows
+ * livecd-rootfs # live CD build script
+ * live-build # new live CD build scripts

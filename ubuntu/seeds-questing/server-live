@@ -1,0 +1,15 @@
+Task-Section: server
+Task-Description: Ubuntu server installer live environment
+Task-Extended-Description: This task provides the extra packages installed on the Ubuntu Server live CD. It is neither useful nor recommended to install this task in other environments.
+
+ * casper
+ * openssh-server
+ * nvme-cli
+ * snap:subiquity/classic=25.10/stable
+ * s390-tools-zkey [s390x]
+
+== ARM64 Devices ==
+
+ # From live-common which isn't included in server-live
+ * ubuntu-x13s-settings-nogrub [arm64]
+ * ubuntu-x1e-settings-nogrub [arm64]

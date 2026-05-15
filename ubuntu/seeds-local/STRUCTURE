@@ -1,0 +1,42 @@
+# Minimal STRUCTURE for Rockchip embedded/server image
+# Only defines seeds needed by: supported -> server-ship-live, cloud-minimal
+# Desktop/live/language seeds removed (not available locally, only on Launchpad)
+
+feature follow-recommends
+feature no-follow-build-depends
+required:
+minimal: required
+boot:
+standard: minimal
+installer:
+build-essential: required
+raspi-common: standard
+
+# Server chain (what we use)
+server: standard
+server-cloud-minimal:
+server-minimal: server-cloud-minimal
+server-ship-live: server-minimal
+server-live: server
+server-raspi: server raspi-common
+cloud-image: standard
+cloud-minimal: server-cloud-minimal
+
+# Supported sets (server only, no desktop)
+supported-cloud: standard
+supported-development-common: standard
+supported-kernel-common: standard
+supported-maas: standard
+supported-hardware-common: standard
+supported-hardware-server: standard
+supported-installer-common: standard
+supported-network-common: standard
+supported-raspi-common: standard
+supported-sysadmin-common: standard
+supported-sysadmin-server: standard
+supported-misc-servers: standard
+supported-server: supported-misc-servers supported-hardware-common supported-hardware-server supported-installer-common supported-network-common supported-sysadmin-common supported-sysadmin-server supported-raspi-common build-essential supported-development-common supported-kernel-common supported-cloud supported-maas
+
+# Minimal embedded profile: no desktop, no live, no language packs
+supported: server-ship-live cloud-minimal
+# make sure supported remains the last entry

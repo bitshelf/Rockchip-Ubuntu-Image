@@ -1,0 +1,108 @@
+name: ubuntu-server-rk3576-arm64
+display-name: Ubuntu Server RK3576 arm64
+revision: 1
+architecture: arm64
+series: noble
+class: preinstalled
+kernel: linux-image-generic
+
+# No gadget section — we build rootfs tarball only.
+# Disk assembly with Rockchip bootloader is handled by assemble-disk.sh.
+
+rootfs:
+  components:
+    - main
+    - restricted
+    - universe
+    - multiverse
+  archive: ubuntu
+  mirror: "http://ports.ubuntu.com/ubuntu-ports/"
+  sources-list-deb822: true
+  seed:
+    # Local file:// git repo (first) provides STRUCTURE + blacklist overrides.
+    # Launchpad (second) resolves platform.noble included by STRUCTURE.
+    urls:
+      - "SEED_URL_PLACEHOLDER"
+    branch: noble
+    vcs: true
+    names:
+      - server-minimal
+      - server
+
+customization:
+  cloud-init:
+    user-data: |
+      #cloud-config
+      chpasswd:
+        expire: true
+        users:
+          - name: ubuntu
+            password: ubuntu
+            type: text
+  extra-packages:
+    # Boot and device tree tools
+    - name: u-boot-tools
+    - name: device-tree-compiler
+    # Filesystem tools
+    - name: dosfstools
+    - name: f2fs-tools
+    - name: btrfs-progs
+    - name: parted
+    - name: e2fsprogs
+    # Networking
+    - name: network-manager
+    - name: openssh-server
+    - name: ethtool
+    - name: iw
+    - name: wpasupplicant
+    # System utilities
+    - name: vim
+    - name: htop
+    - name: iotop
+    - name: usbutils
+    - name: pciutils
+    - name: lshw
+    # Firmware (non-free firmware covers most hardware)
+    - name: linux-firmware
+    # Development (for building kernel modules)
+    - name: build-essential
+    - name: flex
+    - name: bison
+    # Locale support
+    - name: language-pack-en-base
+    - name: language-pack-zh-hans-base
+  fstab:
+    # Note: rootfs is mounted read-only by initramfs overlay hook.
+    # The overlayfs merge mount provides the writable root at /.
+    # These fstab entries are for additional partitions only.
+    - label: "boot"
+      mountpoint: "/boot"
+      filesystem-type: "ext4"
+      dump: false
+      fsck-order: 1
+    - label: "overlay"
+      mountpoint: "/overlay"
+      filesystem-type: "ext4"
+      dump: false
+      fsck-order: 2
+  manual:
+    make-dirs:
+      - path: /ro
+        permissions: 0755
+      - path: /overlay
+        permissions: 0755
+
+# Excluded via seed manipulation (not installed by server/minimal/standard seeds):
+#   Games: gnome-games, gnome-sudoku, gnome-mines, gnome-mahjongg, aisleriot
+#   Updates: unattended-upgrades, update-notifier, update-notifier-common,
+#            update-manager-core, ubuntu-release-upgrader-core
+#   Bloat: thunderbird, libreoffice-*, rhythmbox, transmission-*
+
+artifacts:
+  rootfs-tarball:
+    name: rootfs.tar.gz
+    compression: gzip
+  manifest:
+    name: ubuntu-24.04-preinstalled-server-arm64+rk3576.manifest
+  filelist:
+    name: ubuntu-24.04-preinstalled-server-arm64+rk3576.filelist

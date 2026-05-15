@@ -1,0 +1,256 @@
+name: Build Ubuntu Image for RK3576
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'ubuntu/**'
+      - '.github/workflows/build-image.yml'
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      ubuntu_series:
+        description: 'Ubuntu series'
+        required: true
+        type: choice
+        options:
+          - noble
+          - questing
+        default: noble
+
+concurrency:
+  group: build-image-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+env:
+  DEBIAN_FRONTEND: noninteractive
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  # =========================================================================
+  # Build arm64 rootfs with ubuntu-image classic
+  # Uses QEMU user-mode for arm64 emulation on amd64 host
+  # =========================================================================
+  build-rootfs:
+    name: Build ${{ inputs.ubuntu_series || 'noble' }} rootfs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install host dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            qemu-user-static binfmt-support \
+            gdisk e2fsprogs xz-utils dosfstools \
+            u-boot-tools device-tree-compiler \
+            snapd
+          sudo systemctl restart systemd-binfmt
+
+          # Start snapd and wait for it
+          sudo systemctl enable --now snapd
+          echo "Waiting for snapd to be ready..."
+          for i in $(seq 1 60); do
+            if snap version >/dev/null 2>&1; then
+              echo "snapd ready after ${i}s"
+              break
+            fi
+            sleep 1
+          done
+          snap version
+
+          # Install ubuntu-image classic snap
+          sudo snap install ubuntu-image --classic
+          echo "ubuntu-image snap installed:"
+          /snap/bin/ubuntu-image classic --help 2>&1 | head -3 || true
+
+      - name: Select config
+        id: select
+        run: |
+          SERIES="${{ inputs.ubuntu_series || 'noble' }}"
+          echo "series=${SERIES}" >> $GITHUB_OUTPUT
+          if [[ "${SERIES}" == "questing" ]]; then
+            echo "img_prefix=ubuntu-26.04" >> $GITHUB_OUTPUT
+          else
+            echo "img_prefix=ubuntu-24.04" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build rootfs with ubuntu-image
+        run: |
+          set -euo pipefail
+          SERIES="${{ steps.select.outputs.series }}"
+          MIRROR="http://ports.ubuntu.com/ubuntu-ports/"
+          SCRIPT_DIR="${{ github.workspace }}/ubuntu"
+          ARTIFACTS="${SCRIPT_DIR}/artifacts"
+          rm -rf "${ARTIFACTS}"
+          mkdir -p "${ARTIFACTS}"
+          LOG="${ARTIFACTS}/ubuntu-image.log"
+          echo "=== ubuntu-image build log ===" > "${LOG}"
+          echo "Series: ${SERIES}" >> "${LOG}"
+          echo "Start: $(date -u)" >> "${LOG}"
+
+          # Select YAML definition
+          YAML="${SCRIPT_DIR}/image-definition.yaml"
+          if [[ "${SERIES}" == "questing" ]]; then
+            YAML="${SCRIPT_DIR}/image-definition-questing.yaml"
+          fi
+
+          # Merge base seeds + local overrides into a single seed source.
+          # Germinate expects the layout: <seed-url>/<dist>/  (e.g. seed-url/ubuntu/)
+          # So we create seeds-git/ubuntu/ as the actual git repo, and the seed
+          # URL points to seeds-git/ (the parent).
+          SEEDS_OVERRIDE="${SCRIPT_DIR}/seeds-local"
+          SEEDS_BASE="${SCRIPT_DIR}/seeds"
+          [[ "${SERIES}" == "questing" ]] && SEEDS_BASE="${SCRIPT_DIR}/seeds-questing"
+          SEEDS_GIT="${ARTIFACTS}/seeds-git"        # seed URL points here (parent)
+          SEEDS_REPO="${SEEDS_GIT}/ubuntu"          # git repo with actual seed files
+          rm -rf "${SEEDS_GIT}"
+          mkdir -p "${SEEDS_REPO}"
+
+          # Copy base seeds into ubuntu/ subdirectory
+          if [[ -d "${SEEDS_BASE}" ]]; then
+            cp "${SEEDS_BASE}/"* "${SEEDS_REPO}/"
+            echo "Copied $(ls "${SEEDS_BASE}" | wc -l) base seed files"
+          else
+            echo "ERROR: Base seeds not found at ${SEEDS_BASE}"
+            exit 1
+          fi
+          # Overlay local seed overrides
+          for f in "${SEEDS_OVERRIDE}/"*; do
+            [[ -f "${f}" ]] && cp "${f}" "${SEEDS_REPO}/$(basename "${f}")"
+          done
+          echo "Merged seeds-local overrides into seed source"
+          echo "Final STRUCTURE:"
+          grep "^supported:" "${SEEDS_REPO}/STRUCTURE" || true
+
+          # Init git repo in ubuntu/ (germinate clones <seed-url>/ubuntu/)
+          (cd "${SEEDS_REPO}" && \
+            git init -q && \
+            git config user.email "ci@rockchip-ubuntu.local" && \
+            git config user.name "CI Builder" && \
+            git checkout -b "${SERIES}" -q && \
+            git add . && \
+            git commit -q -m "merged seeds for ${SERIES}")
+          echo "Seeds git repo ready at ${SEEDS_REPO}"
+
+          # Generate resolved YAML with mirror and seed URL
+          TMP_YAML="${ARTIFACTS}/image-definition-resolved.yaml"
+          sed -e "s|mirror:.*|mirror: \"${MIRROR}\"|" \
+              -e "s|SEED_URL_PLACEHOLDER|file://${SEEDS_GIT}|" \
+              "${YAML}" > "${TMP_YAML}"
+
+          echo "=== Resolved YAML ==="
+          cat "${TMP_YAML}"
+          echo ""
+
+          echo "=== Running ubuntu-image classic ==="
+          # Run ubuntu-image; capture exit code manually so we can
+          # upload the log artifact even on failure.
+          set +e
+          # Verify QEMU arm64 binfmt is properly registered
+          echo "=== QEMU binfmt status ===" >> "${LOG}"
+          ls -la /proc/sys/fs/binfmt_misc/qemu-aarch64 2>&1 >> "${LOG}" || true
+          update-binfmts --display qemu-aarch64 2>&1 >> "${LOG}" || true
+
+          # Use --workdir in workspace to avoid /tmp noexec/nodev issue
+          UI_WORKDIR="${ARTIFACTS}/work"
+          mkdir -p "${UI_WORKDIR}"
+          sudo /snap/bin/ubuntu-image classic \
+            --workdir "${UI_WORKDIR}" \
+            "${TMP_YAML}" \
+            -O "${ARTIFACTS}" \
+            --debug 2>&1 | tee -a "${LOG}"
+          echo "--- end of log ---" >> "${LOG}"
+          UI_EXIT_CODE=${PIPESTATUS[0]}
+          set -e
+          echo "ubuntu-image exit code: ${UI_EXIT_CODE}"
+
+          echo ""
+          echo "=== Build output ==="
+          ls -lh "${ARTIFACTS}/" || true
+
+          if [[ -f "${ARTIFACTS}/rootfs.tar.gz" ]]; then
+            echo "SUCCESS: rootfs.tar.gz created"
+          elif [[ ${UI_EXIT_CODE} -ne 0 ]]; then
+            echo "=== ubuntu-image FAILED (exit code: ${UI_EXIT_CODE}) ==="
+            echo "=== Last 100 lines of log ==="
+            tail -100 "${LOG}" || true
+            # Emit as workflow annotations for visibility
+            while IFS= read -r line; do
+              [[ -n "${line}" ]] && echo "::error::${line}"
+            done < <(tail -20 "${LOG}" 2>/dev/null)
+            exit 1
+          else
+            echo "ERROR: rootfs.tar.gz not found in output!"
+            find "${ARTIFACTS}" -type f -ls 2>/dev/null || true
+            exit 1
+          fi
+
+      - name: Upload build log (always)
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: ubuntu-image-log-${{ steps.select.outputs.series }}
+          path: ubuntu/artifacts/ubuntu-image.log
+          retention-days: 3
+
+      - name: Verify rootfs tarball
+        if: success()
+        run: |
+          ARTIFACTS="${{ github.workspace }}/ubuntu/artifacts"
+          echo "=== rootfs.tar.gz ==="
+          ls -lh "${ARTIFACTS}/rootfs.tar.gz"
+          echo "=== Contents (first 20 entries) ==="
+          tar tzf "${ARTIFACTS}/rootfs.tar.gz" | head -20
+          echo ""
+          for m in "${ARTIFACTS}/"*.manifest; do
+            if [[ -f "${m}" ]]; then
+              echo "=== Manifest: $(basename "${m}") ==="
+              wc -l "${m}"
+            fi
+          done
+
+      - name: Set build date
+        id: build_date
+        run: echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_OUTPUT
+
+      - name: Upload rootfs artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: ubuntu-rootfs-${{ steps.select.outputs.series }}-arm64
+          path: |
+            ubuntu/artifacts/rootfs.tar.gz
+            ubuntu/artifacts/*.manifest
+            ubuntu/artifacts/*.filelist
+          retention-days: 7
+
+      - name: Create/Update Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Ubuntu ${{ steps.select.outputs.series }} for RK3576"
+          tag_name: "${{ steps.select.outputs.series }}-latest"
+          body: |
+            Ubuntu ${{ steps.select.outputs.series }} rootfs for Rockchip RK3576
+
+            Built with ubuntu-image classic.
+
+            - Image: `${{ steps.select.outputs.img_prefix }}-preinstalled-server-arm64+rk3576`
+            - Architecture: arm64
+            - Built: ${{ steps.build_date.outputs.date }}
+
+            See [BUILD.md](docs/BUILD.md) for flashing instructions.
+          files: |
+            ubuntu/artifacts/rootfs.tar.gz
+            ubuntu/artifacts/*.manifest
+            ubuntu/artifacts/*.filelist
+          prerelease: false
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

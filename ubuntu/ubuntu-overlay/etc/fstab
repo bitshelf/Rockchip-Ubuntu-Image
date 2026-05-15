@@ -1,0 +1,6 @@
+# Read-only rootfs with overlay partition
+# OverlayFS is set up in initramfs before root is pivoted
+# See /etc/initramfs-tools/scripts/init-bottom/overlay
+
+LABEL=boot    /boot    ext4  defaults,noatime    0  2
+LABEL=overlay /overlay ext4  defaults,noatime    0  2
