@@ -178,16 +178,18 @@ jobs:
             exit 1
           fi
 
-          echo "=== Patching py3compile to prevent QEMU hangs ==="
+          echo "=== Patching chroot (py3compile + snapd info) ==="
           CHROOT=$(find "${UI_WORKDIR}" -name chroot -type d 2>/dev/null | head -1)
           if [[ -n "${CHROOT}" ]]; then
-            sudo tee "${CHROOT}/usr/bin/py3compile" <<<'#!/bin/bash
-          exit 0' > /dev/null
+            # Prevent QEMU hangs during python bytecode compilation
+            echo -e '#!/bin/bash\nexit 0' | sudo tee "${CHROOT}/usr/bin/py3compile" > /dev/null
             sudo chmod +x "${CHROOT}/usr/bin/py3compile"
-            sudo tee "${CHROOT}/usr/bin/py3clean" <<<'#!/bin/bash
-          exit 0' > /dev/null
+            echo -e '#!/bin/bash\nexit 0' | sudo tee "${CHROOT}/usr/bin/py3clean" > /dev/null
             sudo chmod +x "${CHROOT}/usr/bin/py3clean"
-            echo "py3compile patched" | tee -a "${LOG}"
+            # Fix LP:#2089293: snap-preseed needs /usr/lib/snapd/info
+            sudo mkdir -p "${CHROOT}/usr/lib/snapd"
+            echo "VERSION=unknown" | sudo tee "${CHROOT}/usr/lib/snapd/info" > /dev/null
+            echo "chroot patched" | tee -a "${LOG}"
           else
             echo "WARNING: chroot not found at ${UI_WORKDIR}" | tee -a "${LOG}"
           fi
