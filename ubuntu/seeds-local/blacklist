@@ -55,7 +55,9 @@ gnome-maps
 gnome-photos
 gnome-documents
 evince
-snapd
+
+# snapd: NOT blacklisted — required for preseed_image (LP:#2089293).
+# The two-stage build with py3compile patching prevents QEMU hangs.
 
 # blacklist: background update services
 unattended-upgrades
