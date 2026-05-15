@@ -239,15 +239,20 @@ run_ubuntu_image() {
     local seeds_base="${SCRIPT_DIR}/seeds"
     [[ "${UBUNTU_SERIES}" == "questing" ]] && seeds_base="${SCRIPT_DIR}/seeds-questing"
     local seeds_git="${ARTIFACTS_DIR}/seeds-git"
+    local seeds_repo="${seeds_git}/ubuntu"
     rm -rf "${seeds_git}"
-    mkdir -p "${seeds_git}"
-    # Copy base seeds, then overlay local overrides
-    cp "${seeds_base}/"* "${seeds_git}/"
+    mkdir -p "${seeds_repo}"
+    # Copy base seeds into ubuntu/ subdirectory (germinate layout)
+    cp "${seeds_base}/"* "${seeds_repo}/"
+    # Overlay local seed overrides
     for f in "${seeds_override}/"*; do
-        [[ -f "${f}" ]] && cp "${f}" "${seeds_git}/$(basename "${f}")"
+        [[ -f "${f}" ]] && cp "${f}" "${seeds_repo}/$(basename "${f}")"
     done
-    (cd "${seeds_git}" && \
+    # Init git repo inside ubuntu/ (germinate clones <seed-url>/ubuntu/)
+    (cd "${seeds_repo}" && \
         git init -q && \
+        git config user.email "builder@rockchip-ubuntu.local" && \
+        git config user.name "Image Builder" && \
         git checkout -b "${UBUNTU_SERIES}" -q && \
         git add . && \
         git commit -q -m "merged seeds for ${UBUNTU_SERIES}")
@@ -261,9 +266,10 @@ run_ubuntu_image() {
     info "Mirror: ${APT_MIRROR}"
 
     sudo /snap/bin/ubuntu-image classic \
+        --workdir "${ARTIFACTS_DIR}/work" \
         "${tmp_yaml}" \
         -O "${ARTIFACTS_DIR}" \
-        -v 2>&1 | tee "${ARTIFACTS_DIR}/ubuntu-image.log"
+        --debug 2>&1 | tee "${ARTIFACTS_DIR}/ubuntu-image.log"
 
     if [[ -f "${ARTIFACTS_DIR}/rootfs.tar.gz" ]]; then
         info "Rootfs tarball created: ${ARTIFACTS_DIR}/rootfs.tar.gz"
