@@ -154,6 +154,9 @@ jobs:
           ls -la /proc/sys/fs/binfmt_misc/qemu-aarch64 2>&1 >> "${LOG}" || true
           update-binfmts --display qemu-aarch64 2>&1 >> "${LOG}" || true
 
+          echo "=== Network test ===" >> "${LOG}"
+          curl -sI "http://ports.ubuntu.com/ubuntu-ports/" 2>&1 | head -3 >> "${LOG}" || echo "NETWORK FAIL" >> "${LOG}"
+
           echo "=== Stage 1: build chroot, stop before package install ==="
           # Two-stage build per BUILD.md: stop before install_packages
           # to patch py3compile (prevents QEMU hangs during python bytecode).
