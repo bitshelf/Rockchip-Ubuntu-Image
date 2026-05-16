@@ -1,0 +1,230 @@
+name: Rebuild Rockchip Patched Packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: 'Package to rebuild (empty = all)'
+        required: false
+        type: string
+        default: ''
+      ubuntu_series:
+        description: 'Ubuntu series'
+        required: true
+        type: choice
+        options:
+          - noble
+          - questing
+        default: noble
+  push:
+    paths:
+      - 'patches/userland/**'
+      - '.github/workflows/rebuild-packages.yml'
+
+concurrency:
+  group: rebuild-pkgs-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+env:
+  DEBIAN_FRONTEND: noninteractive
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  # =========================================================================
+  # Rebuild each package natively on ARM64 (no QEMU, no cross-compile)
+  # =========================================================================
+  rebuild:
+    name: ${{ matrix.package }} (arm64 native)
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        package:
+          - libdrm
+          - wayland
+          - weston
+          - xserver
+          - v4l-utils
+          - mpv
+          - blueman
+          - cheese
+          - openbox
+          - pcmanfm
+          - wireplumber
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            build-essential dpkg-dev devscripts ubuntu-dev-tools \
+            debhelper quilt fakeroot
+
+      - name: Rebuild ${{ matrix.package }} for arm64
+        run: |
+          set -euo pipefail
+          PKG="${{ matrix.package }}"
+          SERIES="${{ inputs.ubuntu_series || 'noble' }}"
+          OUTPUT="${{ github.workspace }}/ubuntu/rockchip-debs"
+          PATCHDIR="${{ github.workspace }}/patches/userland"
+          WORKDIR="/tmp/rebuild-${PKG}"
+          mkdir -p "$OUTPUT" "$WORKDIR"
+
+          echo "=== Rebuilding $PKG for arm64 ($SERIES) ==="
+          echo "Build started at: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+          # Resolve source package name
+          case "$PKG" in
+            xserver) SRC="xorg-server" ;;
+            mpv)      SRC="mpv" ;;
+            *)        SRC="$PKG" ;;
+          esac
+
+          # Determine patch directory (noble-adapted > flat > version-specific)
+          if [[ -d "$PATCHDIR/$PKG/noble" ]] && ls "$PATCHDIR/$PKG/noble/"*.patch &>/dev/null; then
+            USE_PATCHES="$PATCHDIR/$PKG/noble"
+          elif ls "$PATCHDIR/$PKG/"*.patch &>/dev/null 2>&1; then
+            USE_PATCHES="$PATCHDIR/$PKG"
+          else
+            USE_PATCHES=$(find "$PATCHDIR/$PKG" -maxdepth 2 -name "*.patch" -type f -print -quit 2>/dev/null | xargs dirname 2>/dev/null || echo "")
+          fi
+
+          echo "Patch dir: ${USE_PATCHES:-none}"
+          echo "Source pkg: $SRC"
+
+          # Get source
+          cd "$WORKDIR"
+          pull-lp-source "$SRC" "$SERIES" 2>&1 | tail -3
+          SRCDIR=$(find "$WORKDIR" -maxdepth 1 -type d -name "${SRC}-*" -o -name "${PKG}-*" | head -1)
+          if [[ -z "$SRCDIR" ]]; then
+            echo "ERROR: source not found for $SRC"
+            exit 1
+          fi
+          cd "$SRCDIR"
+          echo "Source: $(pwd)"
+
+          # Apply Rockchip patches
+          applied=0; failed=0
+          if [[ -n "$USE_PATCHES" && -d "$USE_PATCHES" ]]; then
+            for pf in $(find "$USE_PATCHES" -maxdepth 1 -name "*.patch" -type f | sort); do
+              if patch -p1 -N --dry-run < "$pf" 2>/dev/null; then
+                patch -p1 < "$pf" 2>/dev/null
+                applied=$((applied + 1))
+                echo "  OK: $(basename $pf)"
+              else
+                echo "  FAIL: $(basename $pf)"
+                failed=$((failed + 1))
+              fi
+            done
+          fi
+          echo "Patches: $applied applied, $failed failed"
+
+          # Install build dependencies
+          echo "Installing build dependencies..."
+          sudo apt-get build-dep -y -qq "$SRC" 2>&1 | tail -5 || {
+            echo "WARNING: build-dep failed, trying mk-build-deps fallback"
+            sudo apt-get install -y -qq equivs 2>&1 | tail -1
+            ( cd "$SRCDIR" && sudo mk-build-deps --install --remove \
+              --tool 'apt-get -y -o APT::Get::Assume-Yes=true' debian/control ) 2>&1 | tail -5 || {
+              echo "WARNING: mk-build-deps also failed, trying build-dep download only"
+              sudo apt-get build-dep -d -y "$SRC" 2>&1 | tail -3 || true
+            }
+          }
+
+          # Build natively for arm64
+          echo "Building $PKG..."
+          export DEB_BUILD_OPTIONS="${DEB_BUILD_OPTIONS:-nocheck parallel=$(nproc)}"
+          dpkg-buildpackage -us -uc -b -j$(nproc) 2>&1 | tail -40 || {
+            echo "=== BUILD FAILED ==="
+            echo "Checking for error patterns..."
+            tail -100 "$WORKDIR/${SRC}-"*/config.log 2>/dev/null | tail -20 || true
+            find "$WORKDIR" -name "*.log" -exec echo "--- {} ---" \; -exec tail -20 {} \; 2>/dev/null || true
+            echo "Last 20 lines of build output:"
+            find "$WORKDIR" -maxdepth 1 -name "*.build" -exec tail -20 {} \; 2>/dev/null || true
+            exit 1
+          }
+
+          echo "Build finished at: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+          # Collect output
+          find "$WORKDIR" -maxdepth 1 -name "*.deb" -exec cp -v {} "$OUTPUT/" \; 2>/dev/null || true
+          echo "=== Built packages ==="
+          ls -lh "$OUTPUT/" 2>/dev/null
+
+      - name: Verify build artifacts
+        run: |
+          PKG="${{ matrix.package }}"
+          OUTPUT="${{ github.workspace }}/ubuntu/rockchip-debs"
+          DEB_COUNT=$(find "$OUTPUT" -maxdepth 1 -name "*.deb" -type f | wc -l)
+          echo "Package: $PKG"
+          echo "Debs produced: $DEB_COUNT"
+          if [[ "$DEB_COUNT" -eq 0 ]]; then
+            echo "ERROR: No .deb files produced for $PKG"
+            exit 1
+          fi
+          find "$OUTPUT" -maxdepth 1 -name "*.deb" -type f -exec ls -lh {} \;
+          echo "=== Architecture check ==="
+          for deb in "$OUTPUT"/*.deb; do
+            [[ -f "$deb" ]] || continue
+            arch=$(dpkg-deb --field "$deb" Architecture 2>/dev/null || echo "unknown")
+            echo "$(basename $deb): $arch"
+            if [[ "$arch" != "arm64" && "$arch" != "all" ]]; then
+              echo "WARNING: unexpected architecture $arch"
+            fi
+          done
+
+      - name: Upload rebuilt packages
+        uses: actions/upload-artifact@v6
+        with:
+          name: rockchip-debs-${{ matrix.package }}-arm64
+          path: ubuntu/rockchip-debs/*.deb
+          retention-days: 30
+        continue-on-error: true
+
+  # =========================================================================
+  # Publish all rebuilt packages to a single release
+  # =========================================================================
+  publish:
+    name: Publish release
+    runs-on: ubuntu-24.04-arm
+    needs: rebuild
+    if: always() && !cancelled()
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v6
+        with:
+          pattern: rockchip-debs-*
+          path: all-debs
+          merge-multiple: true
+
+      - name: List packages
+        run: |
+          echo "=== Rebuilt packages ==="
+          find all-debs -name "*.deb" -type f -exec ls -lh {} \; 2>/dev/null || echo "No packages built"
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Rockchip Packages (${{ inputs.ubuntu_series || 'noble' }})"
+          tag_name: "pkgs-${{ inputs.ubuntu_series || 'noble' }}-latest"
+          body: |
+            Rockchip-patched arm64 packages for Ubuntu ${{ inputs.ubuntu_series || 'noble' }}
+
+            Built: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+            Architecture: arm64
+            Built on: Native ARM64 runner
+
+            Use with RK3576 Ubuntu images.
+          files: all-debs/*.deb
+          prerelease: false
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,353 @@
+name: Build Ubuntu Image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'ubuntu/**'
+      - 'arm64-classic.yaml'
+      - '.github/workflows/build-image.yml'
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      ubuntu_series:
+        description: 'Ubuntu series'
+        required: true
+        type: choice
+        options:
+          - noble
+          - questing
+        default: noble
+      config:
+        description: 'Image config to build'
+        required: false
+        type: choice
+        options:
+          - rk3576
+          - raspi
+        default: rk3576
+
+concurrency:
+  group: build-image-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+env:
+  DEBIAN_FRONTEND: noninteractive
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  # =========================================================================
+  # Build RK3576 arm64 rootfs with ubuntu-image classic
+  # Native arm64 runner — no QEMU emulation needed
+  # =========================================================================
+  build-rootfs:
+    name: Build ${{ inputs.ubuntu_series || 'noble' }} rootfs
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 180
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.config != 'raspi' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install host dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            debootstrap germinate \
+            gdisk e2fsprogs xz-utils dosfstools \
+            u-boot-tools device-tree-compiler \
+            git snapd
+          sudo snap install ubuntu-image --classic
+          sudo /snap/bin/ubuntu-image --version
+
+      - name: Select config
+        id: select
+        run: |
+          SERIES="${{ inputs.ubuntu_series || 'noble' }}"
+          echo "series=${SERIES}" >> $GITHUB_OUTPUT
+          if [[ "${SERIES}" == "questing" ]]; then
+            echo "img_prefix=ubuntu-26.04" >> $GITHUB_OUTPUT
+          else
+            echo "img_prefix=ubuntu-24.04" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build rootfs with ubuntu-image
+        run: |
+          set -euo pipefail
+          SERIES="${{ steps.select.outputs.series }}"
+          MIRROR="http://ports.ubuntu.com/ubuntu-ports/"
+          SCRIPT_DIR="${{ github.workspace }}/ubuntu"
+          ARTIFACTS="${SCRIPT_DIR}/artifacts"
+          rm -rf "${ARTIFACTS}"
+          mkdir -p "${ARTIFACTS}"
+          LOG="${ARTIFACTS}/ubuntu-image.log"
+          echo "=== ubuntu-image build log ===" > "${LOG}"
+          echo "Series: ${SERIES}" >> "${LOG}"
+          echo "Start: $(date -u)" >> "${LOG}"
+
+          # Select YAML definition
+          YAML="${SCRIPT_DIR}/image-definition.yaml"
+          if [[ "${SERIES}" == "questing" ]]; then
+            YAML="${SCRIPT_DIR}/image-definition-questing.yaml"
+          fi
+
+          # Use Launchpad seeds directly — same approach as successful
+          # arm64-classic.yaml build.  No file:// URL (snap confinement
+          # blocks it) and no local seed merging needed.
+          TMP_YAML="${ARTIFACTS}/image-definition-resolved.yaml"
+          SEED_URL="https://git.launchpad.net/~ubuntu-core-dev/ubuntu-seeds/+git/"
+          sed -e "s|mirror:.*|mirror: \"${MIRROR}\"|" \
+              -e "s|SEED_URL_PLACEHOLDER|${SEED_URL}|" \
+              "${YAML}" > "${TMP_YAML}"
+
+          echo "=== Resolved YAML ==="
+          cat "${TMP_YAML}"
+          echo ""
+
+          echo "=== Network test ===" >> "${LOG}"
+          curl -sI "http://ports.ubuntu.com/ubuntu-ports/" 2>&1 | head -3 >> "${LOG}" || echo "NETWORK FAIL" >> "${LOG}"
+
+          echo "=== Building rootfs (native arm64, single stage) ==="
+          UI_WORKDIR="${ARTIFACTS}/work"
+          mkdir -p "${UI_WORKDIR}"
+          set +e
+          sudo /snap/bin/ubuntu-image classic \
+            --workdir "${UI_WORKDIR}" \
+            "${TMP_YAML}" \
+            -O "${ARTIFACTS}" \
+            --debug 2>&1 | tee -a "${LOG}"
+          UI_EXIT_CODE=${PIPESTATUS[0]}
+          set -e
+          echo "ubuntu-image exit code: ${UI_EXIT_CODE}"
+
+          echo ""
+          echo "=== Build output ==="
+          ls -lh "${ARTIFACTS}/" || true
+
+          if [[ -f "${ARTIFACTS}/rootfs.tar.gz" ]]; then
+            echo "SUCCESS: rootfs.tar.gz created"
+          elif [[ ${UI_EXIT_CODE} -ne 0 ]]; then
+            echo "=== ubuntu-image FAILED (exit code: ${UI_EXIT_CODE}) ==="
+            echo "=== Last 100 lines of log ==="
+            tail -100 "${LOG}" || true
+            {
+              echo "## ubuntu-image Failed (exit code: ${UI_EXIT_CODE})"
+              echo '```'
+              tail -50 "${LOG}" 2>/dev/null
+              echo '```'
+            } >> "${GITHUB_STEP_SUMMARY}"
+            exit 1
+          else
+            echo "ERROR: rootfs.tar.gz not found in output!"
+            find "${ARTIFACTS}" -type f -ls 2>/dev/null || true
+            exit 1
+          fi
+
+      - name: Upload build log (always)
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: ubuntu-image-log-${{ steps.select.outputs.series }}
+          path: ubuntu/artifacts/ubuntu-image.log
+          retention-days: 3
+
+      - name: Verify rootfs tarball
+        if: success()
+        run: |
+          ARTIFACTS="${{ github.workspace }}/ubuntu/artifacts"
+          echo "=== rootfs.tar.gz ==="
+          ls -lh "${ARTIFACTS}/rootfs.tar.gz"
+          echo "=== Contents (first 20 entries) ==="
+          tar tzf "${ARTIFACTS}/rootfs.tar.gz" | head -20
+          echo ""
+          for m in "${ARTIFACTS}/"*.manifest; do
+            if [[ -f "${m}" ]]; then
+              echo "=== Manifest: $(basename "${m}") ==="
+              wc -l "${m}"
+            fi
+          done
+
+      - name: Set build date
+        id: build_date
+        run: echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_OUTPUT
+
+      - name: Upload rootfs artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: ubuntu-rootfs-${{ steps.select.outputs.series }}-arm64
+          path: |
+            ubuntu/artifacts/rootfs.tar.gz
+            ubuntu/artifacts/*.manifest
+            ubuntu/artifacts/*.filelist
+          retention-days: 7
+
+      - name: Create/Update Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Ubuntu ${{ steps.select.outputs.series }} for RK3576"
+          tag_name: "${{ steps.select.outputs.series }}-latest"
+          body: |
+            Ubuntu ${{ steps.select.outputs.series }} rootfs for Rockchip RK3576
+
+            Built with ubuntu-image classic on native arm64 runner.
+
+            - Image: `${{ steps.select.outputs.img_prefix }}-preinstalled-server-arm64+rk3576`
+            - Architecture: arm64
+            - Built: ${{ steps.build_date.outputs.date }}
+
+            See [BUILD.md](docs/BUILD.md) for flashing instructions.
+          files: |
+            ubuntu/artifacts/rootfs.tar.gz
+            ubuntu/artifacts/*.manifest
+            ubuntu/artifacts/*.filelist
+          prerelease: false
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # =========================================================================
+  # Build Raspberry Pi arm64 rootfs with ubuntu-image classic
+  # Uses external Launchpad seeds. Gadget section stripped in CI —
+  # snapd is unsupported on GitHub runners; build rootfs tarball only.
+  # =========================================================================
+  build-raspi:
+    name: Build Raspi ${{ inputs.ubuntu_series || 'noble' }} rootfs
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 180
+    # Disabled after successful comparison with RK3576 build.
+    # Re-enable: change back to original condition or remove if: false.
+    if: false
+    # Original: ${{ github.event_name != 'workflow_dispatch' || inputs.config == 'raspi' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install host dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            debootstrap germinate \
+            gdisk e2fsprogs xz-utils dosfstools \
+            u-boot-tools device-tree-compiler \
+            git snapd
+          sudo snap install ubuntu-image --classic
+          sudo /snap/bin/ubuntu-image --version
+
+      - name: Build Raspi rootfs with ubuntu-image
+        run: |
+          set -euo pipefail
+          SERIES="${{ inputs.ubuntu_series || 'noble' }}"
+          MIRROR="http://ports.ubuntu.com/ubuntu-ports/"
+          ARTIFACTS="${{ github.workspace }}/raspi-artifacts"
+          rm -rf "${ARTIFACTS}"
+          mkdir -p "${ARTIFACTS}"
+          LOG="${ARTIFACTS}/ubuntu-image.log"
+          echo "=== ubuntu-image raspi build log ===" > "${LOG}"
+          echo "Series: ${SERIES}" >> "${LOG}"
+          echo "Start: $(date -u)" >> "${LOG}"
+
+          # Generate CI-safe YAML:
+          # - fix git:// → https:// (GH Actions blocks port 9418)
+          # - strip gadget section (snapd unsupported on GH runners)
+          # - replace mirror with ports.ubuntu.com
+          # - change img artifact → rootfs-tarball
+          YAML_SRC="${{ github.workspace }}/arm64-classic.yaml"
+          TMP_YAML="${ARTIFACTS}/arm64-classic-resolved.yaml"
+          python3 << PYEOF
+          import re
+
+          with open("${YAML_SRC}") as f:
+              lines = f.readlines()
+
+          out = []
+          in_gadget = False
+          for line in lines:
+              line = line.replace("git://git.launchpad.net", "https://git.launchpad.net")
+              line = re.sub(r"^\s*mirror:.*", '  mirror: "${MIRROR}"', line)
+              if line.strip() == "# Gadget snap":
+                  in_gadget = True
+                  continue
+              if in_gadget:
+                  if line.strip() == "":
+                      in_gadget = False
+                  continue
+              if re.match(r"^\s{2}img:", line):
+                  out.append("  rootfs-tarball:\n")
+                  out.append("    name: rootfs.tar.gz\n")
+                  out.append("    compression: gzip\n")
+                  continue
+              if ".img" in line and re.match(r"\s+- name:", line):
+                  continue
+              out.append(line)
+
+          with open("${TMP_YAML}", "w") as f:
+              f.writelines(out)
+          print("=== Resolved YAML ===")
+          import sys
+          sys.stdout.writelines(out)
+          PYEOF
+          echo ""
+
+          echo "=== Network test ===" >> "${LOG}"
+          curl -sI "http://ports.ubuntu.com/ubuntu-ports/" 2>&1 | head -3 >> "${LOG}" || echo "NETWORK FAIL" >> "${LOG}"
+
+          echo "=== Building rootfs (native arm64, single stage) ==="
+          UI_WORKDIR="${ARTIFACTS}/work"
+          mkdir -p "${UI_WORKDIR}"
+          set +e
+          sudo /snap/bin/ubuntu-image classic \
+            --workdir "${UI_WORKDIR}" \
+            "${TMP_YAML}" \
+            -O "${ARTIFACTS}" \
+            --debug 2>&1 | tee -a "${LOG}"
+          UI_EXIT_CODE=${PIPESTATUS[0]}
+          set -e
+          echo "ubuntu-image exit code: ${UI_EXIT_CODE}"
+
+          echo ""
+          echo "=== Build output ==="
+          ls -lh "${ARTIFACTS}/" || true
+
+          if [[ -f "${ARTIFACTS}/rootfs.tar.gz" ]]; then
+            echo "SUCCESS: rootfs.tar.gz created"
+          elif [[ ${UI_EXIT_CODE} -ne 0 ]]; then
+            echo "=== ubuntu-image FAILED (exit code: ${UI_EXIT_CODE}) ==="
+            echo "=== Last 100 lines of log ==="
+            tail -100 "${LOG}" || true
+            {
+              echo "## ubuntu-image Raspi Failed (exit code: ${UI_EXIT_CODE})"
+              echo '```'
+              tail -50 "${LOG}" 2>/dev/null
+              echo '```'
+            } >> "${GITHUB_STEP_SUMMARY}"
+            exit 1
+          else
+            echo "ERROR: rootfs.tar.gz not found in output!"
+            find "${ARTIFACTS}" -type f -ls 2>/dev/null || true
+            exit 1
+          fi
+
+      - name: Upload build log (always)
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: ubuntu-image-log-raspi-${{ inputs.ubuntu_series || 'noble' }}
+          path: raspi-artifacts/ubuntu-image.log
+          retention-days: 3
+
+      - name: Upload raspi rootfs artifact
+        if: success()
+        uses: actions/upload-artifact@v6
+        with:
+          name: ubuntu-raspi-${{ inputs.ubuntu_series || 'noble' }}-arm64
+          path: |
+            raspi-artifacts/rootfs.tar.gz
+            raspi-artifacts/*.manifest
+            raspi-artifacts/*.filelist
+          retention-days: 7

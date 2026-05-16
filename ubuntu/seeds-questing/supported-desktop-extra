@@ -1,0 +1,35 @@
+This seed exists only to allow fine tuning the 3y support time
+
+= Dev tools =
+
+ * gnupg
+ * dirmngr
+
+= Documentation =
+ * gnupg-doc
+ * manpages-dev
+ * tar-doc
+
+= Additional multimedia =
+
+ * gstreamer1.0-tools
+
+= Extra desktop =
+
+ * libreoffice-nlpsolver
+ * libreoffice-officebean
+ * libreoffice-style-colibre
+ * icc-profiles-free
+ * vim-gnome
+ * firefox
+ * xserver-xorg # keep X.org in main until we're sure it can be moved to universe for 26.04 LTS
+
+== Restricted drivers ==
+
+ * %nvidia-graphics-drivers-580
+ * %nvidia-graphics-drivers-580-server
+
+== VM integration ==
+
+ * open-vm-tools-desktop
+

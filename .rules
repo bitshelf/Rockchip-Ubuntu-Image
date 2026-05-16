@@ -1,0 +1,227 @@
+# Ubuntu Image Building Rules
+#
+# Sourced from: canonical/ubuntu-image, Debian Policy Manual,
+# Ubuntu Official Test Suite. Every agent session loads this.
+#
+# High-signal only: non-obvious, repeatedly encountered, specific.
+
+---
+
+## Ubuntu Compliance (MUST PASS ALL)
+
+### Image Identity
+- `/etc/os-release` reports correct series (noble=24.04, questing=26.04)
+- `dpkg --print-architecture` returns `arm64`
+- Ubuntu archive keyring present
+- apt sources use `ports.ubuntu.com` or approved CN mirror (`mirrors.ustc.edu.cn`)
+
+### Package Integrity
+- `dpkg --verify` — zero modified files
+- `apt-get check` — zero broken deps
+- `dpkg --audit` — clean
+- All packages from Ubuntu archive or approved PPA
+
+### Excluded (Embedded)
+- No: gnome-games, gnome-sudoku, gnome-mines, gnome-mahjongg, aisleriot
+- No: unattended-upgrades, update-notifier, update-notifier-common, update-manager-core, ubuntu-release-upgrader-core
+- No: thunderbird, libreoffice-*, rhythmbox, transmission-*
+
+### Systemd
+- Disabled: apt-daily.timer, apt-daily-upgrade.timer, motd-news.timer, snapd.refresh.timer, snapd.snap-refresh.timer
+
+---
+
+## ubuntu-image Classic Mode
+
+Ref: `canonical/ubuntu-image` `internal/imagedefinition/README.rst`
+
+### Image Definition YAML (required fields per spec)
+- `name`, `display-name`: unique identifier
+- `architecture: arm64` (enum: amd64, armhf, arm64, s390x, ppc64el, riscv64)
+- `series: noble|questing` (Ubuntu release codename)
+- `class: preinstalled` (classic images; cloud|installer alternatives)
+- `rootfs.seed.urls`: list of seed source URIs (https://, file://, git://)
+- `rootfs.seed.names`: seed names to resolve (e.g., [server-minimal, server])
+
+### Image Definition YAML (optional fields used)
+- `kernel: linux-image-generic` (default: "linux")
+- `gadget`: absent — rootfs tarball only, no disk image
+- `rootfs.components: [main, restricted, universe, multiverse]` (default: [main, restricted])
+- `rootfs.archive: ubuntu` (default)
+- `rootfs.mirror: http://ports.ubuntu.com/ubuntu-ports/` (required for arm64; archive.ubuntu.com = amd64/i386 only)
+- `rootfs.pocket: updates` (default: release) — adds -updates pocket
+- `rootfs.sources-list-deb822: true` (default: false) — DEB822 format sources
+- `rootfs.seed.branch: noble|questing` (combined with archive to form seed-dist: ubuntu.noble)
+- `rootfs.seed.vcs: true` (default: true) — enables `--vcs=auto` for germinate git clone
+- `customization.extra-packages`: additional packages beyond seed resolution
+- `customization.cloud-init.user-data`: cloud-init configuration
+- `customization.fstab`: additional filesystem table entries
+- `customization.manual.make-dirs`: directories to create in rootfs
+- `artifacts.rootfs-tarball`, `artifacts.manifest`, `artifacts.filelist`: output artifacts
+
+### Seeds (self-contained, no Launchpad dependency)
+- Base seeds: `seeds/` (noble) or `seeds-questing/` (questing) — full Ubuntu seed set
+- Local overrides: `seeds-local/` — blacklist, custom STRUCTURE, minimal supported set
+- Merge at build time: base seeds + seeds-local overlays → git repo in `seeds-git/ubuntu/`
+- `supported: server-ship-live cloud-minimal` — minimal embedded profile (no desktop/live/language)
+- No cloud-image seed (triggers snap pre-seed, fails under QEMU arm64)
+- snapd blacklisted (cannot run under QEMU; preseed_image step needs host snapd)
+- `vcs: true` required — germinate `git clone`s the file:// seed URL
+
+### Seed URL Format (germinate requirement)
+- Germinate appends `/<flavor>/` to seed URL: `file://<seed-url>/ubuntu/`
+- Git repo MUST be at the `ubuntu/` subdirectory, not at seed URL root
+- Seed URL in YAML: `file:///path/to/seeds-git` (parent)
+- Actual seed files: `/path/to/seeds-git/ubuntu/` with `.git/` inside
+
+### Cross-Compilation (Host Architecture Matrix)
+
+### amd64 Host → arm64 Target
+- **ubuntu-image rootfs**: QEMU user static + binfmt_misc (debootstrap --arch arm64)
+- **Two-stage**: `--until install_packages` → patch py3compile → `--resume`
+- **Package rebuild**: `sbuild --host=arm64` with QEMU chroot (Ubuntu official)
+- **Fallback**: `dpkg-buildpackage -aarm64 -d` for simple packages
+- Host deps: qemu-user-static, binfmt-support, crossbuild-essential-arm64, sbuild
+- Timeout: 360 min
+
+### arm64 Host → arm64 Target (Native)
+- **ubuntu-image rootfs**: Native debootstrap (no QEMU needed)
+- **No py3compile patch needed** (no QEMU race condition)
+- **Package rebuild**: `dpkg-buildpackage -us -uc -b` (native)
+- **Build time**: ~15-20 min (vs 3-4 hours on QEMU)
+- **Recommended** for production builds
+
+### GitHub Actions
+- **amd64 runner** (`ubuntu-22.04`): QEMU cross-build (avoids LP:#1886758, GHA #11662 QEMU segfault)
+- **ARM64 runner** (`self-hosted` ARM64): Native build (fast, ~20 min)
+- Set `RUNNER_LABEL= self-hosted` in repo Variables for ARM64 runner
+
+---
+
+## Board Config (`boards/<name>.conf`)
+
+- ALL hardware values in config, NEVER in scripts
+- Source URIs: `file://path` | `https://url` | `git://url` (Yocto-style)
+- Partitions from SDK `rockdev/parameter.txt`
+- Serial: Rockchip=ttyFIQ0@1500000, Allwinner=ttyS0@115200, Amlogic=ttyAML0@115200
+- No product names in code or configs
+- SDK_PATH required — no default, error if unset
+- BOARD required — no default, error if config not found
+
+---
+
+## OverlayFS / Read-Only Rootfs
+
+- Kernel cmdline: `ro rootwait root=PARTLABEL=rootfs`
+- Overlay partition: `upper/` + `work/` dirs
+- Initramfs hook: `etc/initramfs-tools/scripts/init-bottom/overlay`
+- Fstab uses LABEL=, not device paths
+- Upgrade: replace rootfs partition, overlay persists
+- Reset: wipe overlay upper/ + work/
+
+---
+
+## DTS Overlay
+
+- `CONFIG_OF_OVERLAY=y`, `CONFIG_OF_CONFIGFS=y`
+- Overlay .dts: `/dts-v1/; /plugin/;` + all dt-bindings includes
+- DTB compiled with `-@` for symbol table
+- .dtbo → `/boot/overlays/`
+- extlinux.conf: `fdtoverlays` directive
+
+---
+
+## CI (GitHub Actions)
+
+- Runner: `ubuntu-22.04` (amd64+QEMU) — 22.04 avoids QEMU segfault on newer kernels (GHA #11662)
+  Fallback: `ubuntu-24.04` or `self-hosted` ARM64
+- ubuntu-image: installed via `snap install ubuntu-image --classic` (not built from Go source)
+- Upload: rootfs.tar.gz + manifest + filelist + ubuntu-image.log (always)
+- Retention: 3d log, 7d rootfs
+- Timeout: 180 min (within 360 min GHA hard limit; build typically ~60-90 min)
+- Deps: qemu-user-static, binfmt-support, snapd, gdisk, e2fsprogs, xz-utils, dosfstools, u-boot-tools, device-tree-compiler
+
+### CI Modification Rules (MUST FOLLOW)
+
+**Every commit that triggers CI MUST be based on documented evidence:**
+1. **Error-driven**: commit message references the specific CI error being fixed (e.g., "fatal: empty ident name")
+2. **Spec-driven**: references ubuntu-image spec field/behavior (`internal/imagedefinition/README.rst`)
+3. **Bug-driven**: references known Launchpad/GitHub issue (e.g., "LP: #2075546 /tmp noexec")
+4. **No speculative changes**: never push changes without a documented reason linked to an observed failure or spec requirement
+
+**Before pushing:**
+- Verify the fix addresses a specific, documented problem
+- Include the evidence in the commit message (error message, spec reference, bug URL)
+- Check `git diff --stat` and review every changed file
+
+### CI Failure Debug Protocol (MANDATORY)
+
+**When a GHA build fails, the following steps are REQUIRED before making any code changes:**
+1. **Retrieve all logs**: Download the ubuntu-image.log artifact. If artifact unavailable, check job step logs via API or workflow annotations.
+2. **Extract the exact error message**: Identify the precise error (not "build failed" — the actual error like "IncompleteRead", "fatal: empty ident name", "E: Cannot install into target").
+3. **Search official sources for the error**:
+   - **Ubuntu**: Launchpad bugs (bugs.launchpad.net/ubuntu-image), ubuntu-image README.rst spec, germinate docs
+   - **GitHub**: actions/runner-images issues, GitHub Actions docs (usage limits, runner capabilities)
+   - **Debian**: Debian Policy Manual (package dependencies), debootstrap docs (cross-arch behavior)
+4. **Only then make changes**: The fix must reference the specific source (bug ID, spec section, doc URL).
+5. **Document in commit message**: Include the error message, the source of the fix, and the rationale.
+
+### Germinate Seed Layout (CRITICAL)
+
+Germinate expects `<seed-url>/<flavor>/` structure:
+- `flavor` defaults to `"ubuntu"` (from YAML `archive: ubuntu`)
+- seed-dist = `<flavor>.<series>` (e.g., `ubuntu.noble`)
+- Germinate clones `<seed-url>/ubuntu/` as a git repo
+- Seeds must be in `seeds-git/ubuntu/` with **git repo initialized inside ubuntu/**
+- Seed URL in YAML points to `seeds-git/` (parent)
+- `vcs: true` (default) — germinate uses git clone for file:// URLs
+- Without ubuntu/ subdirectory: "Could not open STRUCTURE" error
+
+### Known Issues
+
+- **Launchpad git requires auth**: `https://git.launchpad.net/...` returns 401 in CI. Use self-contained local seeds only.
+- **LP: #2075546** — `/tmp` mounted `noexec`/`nodev` on newer Ubuntu. Fix: `--workdir` in workspace.
+- **LP: #2089293** — `preseed_image` fails for arm64 without snapd on host. Fix: install snapd on host, use `kernel: linux-image-generic`.
+- **QEMU segfault** — ubuntu-24.04 GHA runner kernel 6.14+ may crash QEMU user-mode. If segfaults occur, try `runs-on: ubuntu-22.04`.
+- **ports.ubuntu.com flaky** — intermittent connectivity from Azure East US. Add `Acquire::Retries "5"` for apt, retry build if network error.
+- **LP: #1886758** — `generate_manifests()` fails for arm64 if QEMU binfmt not registered. Verify `/proc/sys/fs/binfmt_misc/qemu-aarch64` exists.
+- **Git identity** — GHA runners have no git user configured. Set `git config user.email/user.name` before any `git commit`.
+
+---
+
+## Testing (Ubuntu Official Methods)
+
+Test suite: `tests/qemu-test.sh` → `test-report.txt`
+
+1. `dpkg --verify` — zero modified
+2. `apt-get check` — zero broken
+3. `dpkg --audit` — clean
+4. os-release matches series
+5. architecture = arm64
+6. No excluded packages
+7. Timers disabled
+8. Initramfs overlay hook executable
+9. /boot has: boot.img, dtbs/, overlays/, extlinux/
+10. /overlay has: upper/, work/
+
+---
+
+## Git Commits
+
+- English, imperative mood
+- Prefix: feat:, fix:, refactor:, docs:, ci:
+- Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>
+
+---
+
+## Project Structure
+
+```
+ubuntu/            # Build scripts (not board-specific)
+boards/            # Board configs only
+scripts/           # Helpers
+tests/             # Ubuntu official test suite
+docs/              # PORTING, ARCHITECTURE, BUILD
+.rules             # This file
+AGENTS.md -> .rules
+```

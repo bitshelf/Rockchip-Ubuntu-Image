@@ -1,0 +1,69 @@
+# blacklist: gnome1 / legacy
+gconf
+libxml
+libcapplet
+gnome-bin
+gnome-libs
+
+# blacklist: security
+uw-imap
+kernel-source-2.4.22
+kernel-source-2.4.23
+kernel-source-2.4.24
+kernel-source-2.4.25
+kernel-source-2.2.25
+svgalib
+stunnel
+apache
+metamail
+mnogosearch
+wu-ftpd
+ecartis
+clamav
+webmin
+
+# blacklist: desktop bloat (excluded from embedded/server)
+gnome-games
+gnome-sudoku
+gnome-mines
+gnome-mahjongg
+aisleriot
+thunderbird
+libreoffice-core
+libreoffice-common
+libreoffice-writer
+libreoffice-calc
+libreoffice-impress
+libreoffice-draw
+libreoffice-math
+libreoffice-base
+rhythmbox
+rhythmbox-plugins
+transmission-gtk
+transmission-common
+transmission-cli
+cheese
+gnome-music
+totem
+gnome-todo
+gnome-characters
+gnome-font-viewer
+gnome-calendar
+gnome-contacts
+gnome-weather
+gnome-maps
+gnome-photos
+gnome-documents
+evince
+
+# snapd: NOT blacklisted — required for preseed_image (LP:#2089293).
+# The two-stage build with py3compile patching prevents QEMU hangs.
+
+# blacklist: background update services
+unattended-upgrades
+update-notifier
+update-notifier-common
+update-manager-core
+ubuntu-release-upgrader-core
+ubuntu-release-upgrader-gtk
+apt-config-auto-update

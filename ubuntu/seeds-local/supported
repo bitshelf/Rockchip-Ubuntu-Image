@@ -1,0 +1,6 @@
+Task-Seeds: server-ship-live cloud-minimal
+Task-Description: Supported server packages (minimal — Rockchip embedded)
+
+# Intentionally minimal: server-minimal already provides the base.
+# Add packages here that should be in the supported set but not
+# pulled in by server-minimal or server seeds.
