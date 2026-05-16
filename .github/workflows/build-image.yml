@@ -112,17 +112,17 @@ jobs:
 
           # Merge base seeds + local overrides into a single seed source.
           # Germinate expects the layout: <seed-url>/<dist>/  (e.g. seed-url/ubuntu/)
-          # So we create seeds-git/ubuntu/ as the actual directory, and the seed
-          # URL points to seeds-git/ (the parent).  vcs:true is stripped —
-          # germinate reads the directory directly without git.
+          # So we create seeds-git/ubuntu/ as the actual git repo, and the seed
+          # URL points to seeds-git/ (the parent).
           SEEDS_OVERRIDE="${SCRIPT_DIR}/seeds-local"
           SEEDS_BASE="${SCRIPT_DIR}/seeds"
           [[ "${SERIES}" == "questing" ]] && SEEDS_BASE="${SCRIPT_DIR}/seeds-questing"
           SEEDS_GIT="${ARTIFACTS}/seeds-git"        # seed URL points here (parent)
-          SEEDS_REPO="${SEEDS_GIT}/ubuntu"          # seed files live here
+          SEEDS_REPO="${SEEDS_GIT}/ubuntu"          # git repo with actual seed files
           rm -rf "${SEEDS_GIT}"
           mkdir -p "${SEEDS_REPO}"
 
+          # Copy base seeds into ubuntu/ subdirectory
           if [[ -d "${SEEDS_BASE}" ]]; then
             cp "${SEEDS_BASE}/"* "${SEEDS_REPO}/"
             echo "Copied $(ls "${SEEDS_BASE}" | wc -l) base seed files"
@@ -130,12 +130,25 @@ jobs:
             echo "ERROR: Base seeds not found at ${SEEDS_BASE}"
             exit 1
           fi
+          # Overlay local seed overrides
           for f in "${SEEDS_OVERRIDE}/"*; do
             [[ -f "${f}" ]] && cp "${f}" "${SEEDS_REPO}/$(basename "${f}")"
           done
-          echo "Merged $(ls "${SEEDS_REPO}" | wc -l) seed files"
+          echo "Merged seeds-local overrides into seed source"
+          echo "Final STRUCTURE:"
+          grep "^supported:" "${SEEDS_REPO}/STRUCTURE" || true
 
-          # Generate resolved YAML with mirror and seed URL, drop vcs:true.
+          # Init git repo in ubuntu/ (germinate clones <seed-url>/ubuntu/)
+          (cd "${SEEDS_REPO}" && \
+            git init -q && \
+            git config user.email "ci@rockchip-ubuntu.local" && \
+            git config user.name "CI Builder" && \
+            git checkout -b "${SERIES}" -q && \
+            git add . && \
+            git commit -q -m "merged seeds for ${SERIES}")
+          echo "Seeds git repo ready at ${SEEDS_REPO}"
+
+          # Generate resolved YAML with mirror and seed URL
           TMP_YAML="${ARTIFACTS}/image-definition-resolved.yaml"
           sed -e "s|mirror:.*|mirror: \"${MIRROR}\"|" \
               -e "s|SEED_URL_PLACEHOLDER|file://${SEEDS_GIT}|" \
