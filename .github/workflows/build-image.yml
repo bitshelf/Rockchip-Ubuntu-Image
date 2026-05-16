@@ -61,23 +61,9 @@ jobs:
             debootstrap germinate \
             gdisk e2fsprogs xz-utils dosfstools \
             u-boot-tools device-tree-compiler \
-            git
-
-      - name: Install Go (ubuntu-image requires >=1.25)
-        run: |
-          GO_VER=1.25.0
-          curl -sL "https://go.dev/dl/go${GO_VER}.linux-arm64.tar.gz" -o /tmp/go.tar.gz
-          sudo tar -C /usr/local -xzf /tmp/go.tar.gz
-          echo "/usr/local/go/bin" >> $GITHUB_PATH
-          /usr/local/go/bin/go version
-
-      - name: Build ubuntu-image from source
-        run: |
-          git clone --depth 1 https://github.com/canonical/ubuntu-image.git /tmp/ubuntu-image
-          cd /tmp/ubuntu-image
-          go build -o ubuntu-image ./cmd/ubuntu-image
-          sudo cp ubuntu-image /usr/local/bin/ubuntu-image
-          /usr/local/bin/ubuntu-image --version
+            git snapd
+          sudo snap install ubuntu-image --classic
+          sudo /snap/bin/ubuntu-image --version
 
       - name: Select config
         id: select
@@ -166,7 +152,7 @@ jobs:
           UI_WORKDIR="${ARTIFACTS}/work"
           mkdir -p "${UI_WORKDIR}"
           set +e
-          sudo /usr/local/bin/ubuntu-image classic \
+          sudo /snap/bin/ubuntu-image classic \
             --workdir "${UI_WORKDIR}" \
             "${TMP_YAML}" \
             -O "${ARTIFACTS}" \
@@ -285,23 +271,9 @@ jobs:
             debootstrap germinate \
             gdisk e2fsprogs xz-utils dosfstools \
             u-boot-tools device-tree-compiler \
-            git
-
-      - name: Install Go (ubuntu-image requires >=1.25)
-        run: |
-          GO_VER=1.25.0
-          curl -sL "https://go.dev/dl/go${GO_VER}.linux-arm64.tar.gz" -o /tmp/go.tar.gz
-          sudo tar -C /usr/local -xzf /tmp/go.tar.gz
-          echo "/usr/local/go/bin" >> $GITHUB_PATH
-          /usr/local/go/bin/go version
-
-      - name: Build ubuntu-image from source
-        run: |
-          git clone --depth 1 https://github.com/canonical/ubuntu-image.git /tmp/ubuntu-image
-          cd /tmp/ubuntu-image
-          go build -o ubuntu-image ./cmd/ubuntu-image
-          sudo cp ubuntu-image /usr/local/bin/ubuntu-image
-          /usr/local/bin/ubuntu-image --version
+            git snapd
+          sudo snap install ubuntu-image --classic
+          sudo /snap/bin/ubuntu-image --version
 
       - name: Build Raspi rootfs with ubuntu-image
         run: |
@@ -365,7 +337,7 @@ jobs:
           UI_WORKDIR="${ARTIFACTS}/work"
           mkdir -p "${UI_WORKDIR}"
           set +e
-          sudo /usr/local/bin/ubuntu-image classic \
+          sudo /snap/bin/ubuntu-image classic \
             --workdir "${UI_WORKDIR}" \
             "${TMP_YAML}" \
             -O "${ARTIFACTS}" \
