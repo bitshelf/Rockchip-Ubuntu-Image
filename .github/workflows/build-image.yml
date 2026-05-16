@@ -152,6 +152,7 @@ jobs:
           TMP_YAML="${ARTIFACTS}/image-definition-resolved.yaml"
           sed -e "s|mirror:.*|mirror: \"${MIRROR}\"|" \
               -e "s|SEED_URL_PLACEHOLDER|file://${SEEDS_GIT}|" \
+              -e '/vcs: true/d' \
               "${YAML}" > "${TMP_YAML}"
 
           echo "=== Resolved YAML ==="
