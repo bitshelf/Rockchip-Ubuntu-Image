@@ -307,11 +307,12 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # =========================================================================
-  # Build Raspberry Pi arm64 image with ubuntu-image classic
-  # Uses external Launchpad seeds + snap-pi gadget
+  # Build Raspberry Pi arm64 rootfs with ubuntu-image classic
+  # Uses external Launchpad seeds. Gadget section stripped in CI —
+  # snapd is unsupported on GitHub runners; build rootfs tarball only.
   # =========================================================================
   build-raspi:
-    name: Build Raspi ${{ inputs.ubuntu_series || 'noble' }} image
+    name: Build Raspi ${{ inputs.ubuntu_series || 'noble' }} rootfs
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.config == 'raspi' }}
@@ -328,19 +329,7 @@ jobs:
             debootstrap germinate \
             gdisk e2fsprogs xz-utils dosfstools \
             u-boot-tools device-tree-compiler \
-            git snapd
-
-          # Start snapd and wait for it to be ready
-          sudo systemctl start snapd || true
-          sudo systemctl enable snapd || true
-          sleep 5
-          sudo snap wait system seed.loaded 2>/dev/null || true
-
-          # Install snapcraft for gadget snap building
-          sudo snap install snapcraft --classic 2>&1 || {
-            echo "WARNING: snapcraft install failed, trying snapd snap build fallback"
-          }
-
+            git
           sudo systemctl restart systemd-binfmt
 
       - name: Install Go (ubuntu-image requires >=1.25)
@@ -359,7 +348,7 @@ jobs:
           sudo cp ubuntu-image /usr/local/bin/ubuntu-image
           /usr/local/bin/ubuntu-image --version
 
-      - name: Build Raspi image with ubuntu-image
+      - name: Build Raspi rootfs with ubuntu-image
         run: |
           set -euo pipefail
           SERIES="${{ inputs.ubuntu_series || 'noble' }}"
@@ -372,15 +361,47 @@ jobs:
           echo "Series: ${SERIES}" >> "${LOG}"
           echo "Start: $(date -u)" >> "${LOG}"
 
-          # Fix git:// → https:// (GH Actions blocks git protocol port 9418)
+          # Generate CI-safe YAML — strip gadget (snapd unsupported on
+          # GitHub runners), fix git:// → https://, replace mirror.
           YAML_SRC="${{ github.workspace }}/arm64-classic.yaml"
           TMP_YAML="${ARTIFACTS}/arm64-classic-resolved.yaml"
-          sed -e 's|git://git.launchpad.net|https://git.launchpad.net|g' \
-              -e "s|mirror:.*|mirror: \"${MIRROR}\"|" \
-              "${YAML_SRC}" > "${TMP_YAML}"
+          python3 << PYEOF
+          import re
 
-          echo "=== Resolved YAML ==="
-          cat "${TMP_YAML}"
+          with open("${YAML_SRC}") as f:
+              lines = f.readlines()
+
+          out = []
+          in_gadget = False
+          for line in lines:
+              # Fix git:// protocol — GitHub Actions blocks port 9418
+              line = line.replace("git://git.launchpad.net", "https://git.launchpad.net")
+              # Use ports.ubuntu.com mirror
+              line = re.sub(r"^\s*mirror:.*", '  mirror: "${MIRROR}"', line)
+              # Strip gadget section entirely (snapd not available in CI)
+              if line.strip() == "# Gadget snap":
+                  in_gadget = True
+                  continue
+              if in_gadget:
+                  if line.strip() == "":
+                      in_gadget = False
+                  continue
+              # Replace img artifact with rootfs-tarball
+              if re.match(r"^\s{2}img:", line):
+                  out.append("  rootfs-tarball:\n")
+                  out.append("    name: rootfs.tar.gz\n")
+                  out.append("    compression: gzip\n")
+                  continue
+              if ".img" in line and re.match(r"\s+- name:", line):
+                  continue
+              out.append(line)
+
+          with open("${TMP_YAML}", "w") as f:
+              f.writelines(out)
+          print("=== Resolved YAML ===")
+          import sys
+          sys.stdout.writelines(out)
+          PYEOF
           echo ""
 
           echo "=== QEMU binfmt status ===" >> "${LOG}"
@@ -426,7 +447,7 @@ jobs:
             echo "WARNING: chroot not found at ${UI_WORKDIR}" | tee -a "${LOG}"
           fi
 
-          echo "=== Stage 2: install packages, build gadget, complete image ==="
+          echo "=== Stage 2: install packages and complete build ==="
           set +e
           sudo /usr/local/bin/ubuntu-image classic \
             --workdir "${UI_WORKDIR}" \
@@ -440,11 +461,10 @@ jobs:
 
           echo ""
           echo "=== Build output ==="
-          find "${ARTIFACTS}" -type f \( -name "*.img" -o -name "*.img.xz" \) -ls 2>/dev/null || true
           ls -lh "${ARTIFACTS}/" || true
 
-          if find "${ARTIFACTS}" -maxdepth 1 -name "*.img*" | grep -q .; then
-            echo "SUCCESS: image created"
+          if [[ -f "${ARTIFACTS}/rootfs.tar.gz" ]]; then
+            echo "SUCCESS: rootfs.tar.gz created"
           elif [[ ${UI_EXIT_CODE} -ne 0 ]]; then
             echo "=== ubuntu-image FAILED (exit code: ${UI_EXIT_CODE}) ==="
             echo "=== Last 100 lines of log ==="
@@ -457,7 +477,7 @@ jobs:
             } >> "${GITHUB_STEP_SUMMARY}"
             exit 1
           else
-            echo "ERROR: no .img found in output!"
+            echo "ERROR: rootfs.tar.gz not found in output!"
             find "${ARTIFACTS}" -type f -ls 2>/dev/null || true
             exit 1
           fi
@@ -470,14 +490,13 @@ jobs:
           path: raspi-artifacts/ubuntu-image.log
           retention-days: 3
 
-      - name: Upload raspi image artifact
+      - name: Upload raspi rootfs artifact
         if: success()
         uses: actions/upload-artifact@v6
         with:
           name: ubuntu-raspi-${{ inputs.ubuntu_series || 'noble' }}-arm64
           path: |
-            raspi-artifacts/*.img
-            raspi-artifacts/*.img.xz
+            raspi-artifacts/rootfs.tar.gz
             raspi-artifacts/*.manifest
             raspi-artifacts/*.filelist
           retention-days: 7
