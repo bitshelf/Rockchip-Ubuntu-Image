@@ -40,6 +40,8 @@ customization:
             password: ubuntu
             type: text
   extra-packages:
+    # Basic system tools needed by other package postinst scripts
+    - name: file
     # Boot and device tree tools
     - name: u-boot-tools
     - name: device-tree-compiler
