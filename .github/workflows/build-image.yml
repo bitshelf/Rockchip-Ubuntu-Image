@@ -269,7 +269,10 @@ jobs:
     name: Build Raspi ${{ inputs.ubuntu_series || 'noble' }} rootfs
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 180
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.config == 'raspi' }}
+    # Disabled after successful comparison with RK3576 build.
+    # Re-enable: change back to original condition or remove if: false.
+    if: false
+    # Original: ${{ github.event_name != 'workflow_dispatch' || inputs.config == 'raspi' }}
 
     steps:
       - name: Checkout
