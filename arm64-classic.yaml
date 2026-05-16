@@ -1,0 +1,72 @@
+# Image metadata
+name: ubuntu-server-raspi-arm64
+display-name: Ubuntu Server Raspberry Pi arm64
+revision: 1
+architecture: arm64
+series: noble
+class: preinstalled
+kernel: linux-image-raspi
+
+# Gadget snap
+gadget:
+  url: https://git.launchpad.net/snap-pi
+  branch: "classic"
+  type: "git"
+
+# Root filesystem definition
+rootfs:
+  archive: ubuntu
+  sources-list-deb822: true
+  components:
+    - main
+    - restricted
+    - universe
+    - multiverse
+  # mirror: http://ports.ubuntu.com/ubuntu-ports/
+  mirror: http://mirrors.tuna.tsinghua.edu.cn/ubuntu-ports/
+  pocket: updates
+  seed:
+    urls:
+      - git://git.launchpad.net/~ubuntu-core-dev/ubuntu-seeds/+git/
+    branch: noble
+    names:
+      - server
+      - server-raspi
+      - raspi-common
+      - minimal
+      - standard
+      - cloud-image
+      - supported-raspi-common
+
+# Additional settings
+customization:
+  cloud-init:
+    user-data: |
+      #cloud-config
+      chpasswd:
+        expire: true
+        users:
+          - name: ubuntu
+            password: ubuntu
+            type: text
+  extra-snaps:
+    - name: snapd
+  fstab:
+    - label: "writable"
+      mountpoint: "/"
+      filesystem-type: "ext4"
+      dump: false
+      fsck-order: 1
+    - label: "system-boot"
+      mountpoint: "/boot/firmware"
+      filesystem-type: "vfat"
+      mount-options: "defaults"
+      dump: false
+      fsck-order: 1
+
+# Artifacts to generate
+artifacts:
+  img:
+    - name: ubuntu-24.04-preinstalled-server-arm64+raspi.img
+  manifest:
+    name: ubuntu-24.04-preinstalled-server-arm64+raspi.manifest

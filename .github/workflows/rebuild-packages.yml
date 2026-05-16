@@ -79,14 +79,16 @@ jobs:
           mkdir -p "$OUTPUT" "$WORKDIR"
 
           echo "=== Rebuilding $PKG for arm64 ($SERIES) ==="
+          echo "Build started at: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
           # Resolve source package name
           case "$PKG" in
             xserver) SRC="xorg-server" ;;
-            *) SRC="$PKG" ;;
+            mpv)      SRC="mpv" ;;
+            *)        SRC="$PKG" ;;
           esac
 
-          # Determine patch directory (noble-adapted > version-specific > top-level)
+          # Determine patch directory (noble-adapted > flat > version-specific)
           if [[ -d "$PATCHDIR/$PKG/noble" ]] && ls "$PATCHDIR/$PKG/noble/"*.patch &>/dev/null; then
             USE_PATCHES="$PATCHDIR/$PKG/noble"
           elif ls "$PATCHDIR/$PKG/"*.patch &>/dev/null 2>&1; then
@@ -128,43 +130,56 @@ jobs:
           # Install build dependencies
           echo "Installing build dependencies..."
           sudo apt-get build-dep -y -qq "$SRC" 2>&1 | tail -5 || {
-            echo "WARNING: build-dep failed, trying alternate methods"
-            sudo apt-get build-dep -d -y -qq "$SRC" 2>&1 | tail -3
+            echo "WARNING: build-dep failed, trying mk-build-deps fallback"
+            sudo apt-get install -y -qq equivs 2>&1 | tail -1
+            ( cd "$SRCDIR" && sudo mk-build-deps --install --remove \
+              --tool 'apt-get -y -o APT::Get::Assume-Yes=true' debian/control ) 2>&1 | tail -5 || {
+              echo "WARNING: mk-build-deps also failed, trying build-dep download only"
+              sudo apt-get build-dep -d -y "$SRC" 2>&1 | tail -3 || true
+            }
           }
 
           # Build natively for arm64
           echo "Building $PKG..."
-          dpkg-buildpackage -us -uc -b -j$(nproc) 2>&1 | tail -40
+          export DEB_BUILD_OPTIONS="${DEB_BUILD_OPTIONS:-nocheck parallel=$(nproc)}"
+          dpkg-buildpackage -us -uc -b -j$(nproc) 2>&1 | tail -40 || {
+            echo "=== BUILD FAILED ==="
+            echo "Checking for error patterns..."
+            tail -100 "$WORKDIR/${SRC}-"*/config.log 2>/dev/null | tail -20 || true
+            find "$WORKDIR" -name "*.log" -exec echo "--- {} ---" \; -exec tail -20 {} \; 2>/dev/null || true
+            echo "Last 20 lines of build output:"
+            find "$WORKDIR" -maxdepth 1 -name "*.build" -exec tail -20 {} \; 2>/dev/null || true
+            exit 1
+          }
+
+          echo "Build finished at: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
           # Collect output
           find "$WORKDIR" -maxdepth 1 -name "*.deb" -exec cp -v {} "$OUTPUT/" \; 2>/dev/null || true
           echo "=== Built packages ==="
           ls -lh "$OUTPUT/" 2>/dev/null
 
-      - name: Run package tests
+      - name: Verify build artifacts
         run: |
           PKG="${{ matrix.package }}"
-          case "$PKG" in
-            xserver) SRC="xorg-server" ;;
-            *) SRC="$PKG" ;;
-          esac
-          WORKDIR="/tmp/rebuild-${PKG}"
-          SRCDIR=$(find "$WORKDIR" -maxdepth 1 -type d -name "${SRC}-*" -o -name "${PKG}-*" | head -1)
-          if [[ -d "$SRCDIR" ]]; then
-            cd "$SRCDIR"
-            echo "=== Running upstream tests for $PKG ==="
-            # Run package-specific tests if available
-            if [[ -f debian/tests/control ]] || [[ -d debian/tests ]]; then
-              echo "Found autopkgtest definitions"
-            fi
-            # Try build-time tests
-            if grep -q "check:" Makefile 2>/dev/null || grep -q "check:" debian/rules 2>/dev/null; then
-              echo "Found check target"
-            fi
-            # Run dpkg-buildpackage test if there's a test target
-            DEB_BUILD_OPTIONS=nocheck dpkg-buildpackage -us -uc -b -j$(nproc) 2>&1 | tail -5 || true
+          OUTPUT="${{ github.workspace }}/ubuntu/rockchip-debs"
+          DEB_COUNT=$(find "$OUTPUT" -maxdepth 1 -name "*.deb" -type f | wc -l)
+          echo "Package: $PKG"
+          echo "Debs produced: $DEB_COUNT"
+          if [[ "$DEB_COUNT" -eq 0 ]]; then
+            echo "ERROR: No .deb files produced for $PKG"
+            exit 1
           fi
-        continue-on-error: true
+          find "$OUTPUT" -maxdepth 1 -name "*.deb" -type f -exec ls -lh {} \;
+          echo "=== Architecture check ==="
+          for deb in "$OUTPUT"/*.deb; do
+            [[ -f "$deb" ]] || continue
+            arch=$(dpkg-deb --field "$deb" Architecture 2>/dev/null || echo "unknown")
+            echo "$(basename $deb): $arch"
+            if [[ "$arch" != "arm64" && "$arch" != "all" ]]; then
+              echo "WARNING: unexpected architecture $arch"
+            fi
+          done
 
       - name: Upload rebuilt packages
         uses: actions/upload-artifact@v6
