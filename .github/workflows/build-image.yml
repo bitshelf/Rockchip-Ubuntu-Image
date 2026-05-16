@@ -1,4 +1,4 @@
-name: Build Ubuntu Image for RK3576
+name: Build Ubuntu Image
 
 on:
   push:
@@ -41,12 +41,12 @@ env:
 
 jobs:
   # =========================================================================
-  # Build arm64 rootfs with ubuntu-image classic
-  # Uses QEMU user-mode for arm64 emulation on amd64 host
+  # Build RK3576 arm64 rootfs with ubuntu-image classic
+  # Native arm64 runner — no QEMU emulation needed
   # =========================================================================
   build-rootfs:
     name: Build ${{ inputs.ubuntu_series || 'noble' }} rootfs
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 180
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.config != 'raspi' }}
 
@@ -58,18 +58,15 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq \
-            qemu-user-static binfmt-support \
             debootstrap germinate \
             gdisk e2fsprogs xz-utils dosfstools \
             u-boot-tools device-tree-compiler \
             git
-          sudo systemctl restart systemd-binfmt
 
       - name: Install Go (ubuntu-image requires >=1.25)
         run: |
-          # noble has golang 1.22 — ubuntu-image go.mod requires 1.25
           GO_VER=1.25.0
-          curl -sL "https://go.dev/dl/go${GO_VER}.linux-amd64.tar.gz" -o /tmp/go.tar.gz
+          curl -sL "https://go.dev/dl/go${GO_VER}.linux-arm64.tar.gz" -o /tmp/go.tar.gz
           sudo tar -C /usr/local -xzf /tmp/go.tar.gz
           echo "/usr/local/go/bin" >> $GITHUB_PATH
           /usr/local/go/bin/go version
@@ -161,58 +158,15 @@ jobs:
           cat "${TMP_YAML}"
           echo ""
 
-          echo "=== QEMU binfmt status ===" >> "${LOG}"
-          ls -la /proc/sys/fs/binfmt_misc/qemu-aarch64 2>&1 >> "${LOG}" || true
-          update-binfmts --display qemu-aarch64 2>&1 >> "${LOG}" || true
-
           echo "=== Network test ===" >> "${LOG}"
           curl -sI "http://ports.ubuntu.com/ubuntu-ports/" 2>&1 | head -3 >> "${LOG}" || echo "NETWORK FAIL" >> "${LOG}"
 
-          echo "=== Stage 1: build chroot, stop before package install ==="
-          # Two-stage build per BUILD.md: stop before install_packages
-          # to patch py3compile (prevents QEMU hangs during python bytecode).
+          echo "=== Building rootfs (native arm64, single stage) ==="
           UI_WORKDIR="${ARTIFACTS}/work"
           mkdir -p "${UI_WORKDIR}"
           set +e
           sudo /usr/local/bin/ubuntu-image classic \
             --workdir "${UI_WORKDIR}" \
-            --until install_packages \
-            "${TMP_YAML}" \
-            -O "${ARTIFACTS}" \
-            --debug 2>&1 | tee -a "${LOG}"
-          S1_EXIT=${PIPESTATUS[0]}
-          set -e
-          echo "Stage 1 exit: ${S1_EXIT}" | tee -a "${LOG}"
-          if [[ ${S1_EXIT} -ne 0 ]]; then
-            echo "## Stage 1 FAILED (exit ${S1_EXIT})" >> "${GITHUB_STEP_SUMMARY}"
-            echo '```' >> "${GITHUB_STEP_SUMMARY}"
-            tail -50 "${LOG}" >> "${GITHUB_STEP_SUMMARY}"
-            echo '```' >> "${GITHUB_STEP_SUMMARY}"
-            tail -50 "${LOG}"
-            exit 1
-          fi
-
-          echo "=== Patching chroot (py3compile + snapd info) ==="
-          CHROOT=$(find "${UI_WORKDIR}" -name chroot -type d 2>/dev/null | head -1)
-          if [[ -n "${CHROOT}" ]]; then
-            # Prevent QEMU hangs during python bytecode compilation
-            echo -e '#!/bin/bash\nexit 0' | sudo tee "${CHROOT}/usr/bin/py3compile" > /dev/null
-            sudo chmod +x "${CHROOT}/usr/bin/py3compile"
-            echo -e '#!/bin/bash\nexit 0' | sudo tee "${CHROOT}/usr/bin/py3clean" > /dev/null
-            sudo chmod +x "${CHROOT}/usr/bin/py3clean"
-            # Fix LP:#2089293: snap-preseed needs /usr/lib/snapd/info
-            sudo mkdir -p "${CHROOT}/usr/lib/snapd"
-            echo "VERSION=unknown" | sudo tee "${CHROOT}/usr/lib/snapd/info" > /dev/null
-            echo "chroot patched" | tee -a "${LOG}"
-          else
-            echo "WARNING: chroot not found at ${UI_WORKDIR}" | tee -a "${LOG}"
-          fi
-
-          echo "=== Stage 2: install packages and complete build ==="
-          set +e
-          sudo /usr/local/bin/ubuntu-image classic \
-            --workdir "${UI_WORKDIR}" \
-            --resume \
             "${TMP_YAML}" \
             -O "${ARTIFACTS}" \
             --debug 2>&1 | tee -a "${LOG}"
@@ -230,7 +184,6 @@ jobs:
             echo "=== ubuntu-image FAILED (exit code: ${UI_EXIT_CODE}) ==="
             echo "=== Last 100 lines of log ==="
             tail -100 "${LOG}" || true
-            # Write to step summary (visible on run page without auth)
             {
               echo "## ubuntu-image Failed (exit code: ${UI_EXIT_CODE})"
               echo '```'
@@ -290,7 +243,7 @@ jobs:
           body: |
             Ubuntu ${{ steps.select.outputs.series }} rootfs for Rockchip RK3576
 
-            Built with ubuntu-image classic.
+            Built with ubuntu-image classic on native arm64 runner.
 
             - Image: `${{ steps.select.outputs.img_prefix }}-preinstalled-server-arm64+rk3576`
             - Architecture: arm64
@@ -313,7 +266,7 @@ jobs:
   # =========================================================================
   build-raspi:
     name: Build Raspi ${{ inputs.ubuntu_series || 'noble' }} rootfs
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 180
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.config == 'raspi' }}
 
@@ -325,17 +278,15 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq \
-            qemu-user-static binfmt-support \
             debootstrap germinate \
             gdisk e2fsprogs xz-utils dosfstools \
             u-boot-tools device-tree-compiler \
             git
-          sudo systemctl restart systemd-binfmt
 
       - name: Install Go (ubuntu-image requires >=1.25)
         run: |
           GO_VER=1.25.0
-          curl -sL "https://go.dev/dl/go${GO_VER}.linux-amd64.tar.gz" -o /tmp/go.tar.gz
+          curl -sL "https://go.dev/dl/go${GO_VER}.linux-arm64.tar.gz" -o /tmp/go.tar.gz
           sudo tar -C /usr/local -xzf /tmp/go.tar.gz
           echo "/usr/local/go/bin" >> $GITHUB_PATH
           /usr/local/go/bin/go version
@@ -361,8 +312,11 @@ jobs:
           echo "Series: ${SERIES}" >> "${LOG}"
           echo "Start: $(date -u)" >> "${LOG}"
 
-          # Generate CI-safe YAML — strip gadget (snapd unsupported on
-          # GitHub runners), fix git:// → https://, replace mirror.
+          # Generate CI-safe YAML:
+          # - fix git:// → https:// (GH Actions blocks port 9418)
+          # - strip gadget section (snapd unsupported on GH runners)
+          # - replace mirror with ports.ubuntu.com
+          # - change img artifact → rootfs-tarball
           YAML_SRC="${{ github.workspace }}/arm64-classic.yaml"
           TMP_YAML="${ARTIFACTS}/arm64-classic-resolved.yaml"
           python3 << PYEOF
@@ -374,11 +328,8 @@ jobs:
           out = []
           in_gadget = False
           for line in lines:
-              # Fix git:// protocol — GitHub Actions blocks port 9418
               line = line.replace("git://git.launchpad.net", "https://git.launchpad.net")
-              # Use ports.ubuntu.com mirror
               line = re.sub(r"^\s*mirror:.*", '  mirror: "${MIRROR}"', line)
-              # Strip gadget section entirely (snapd not available in CI)
               if line.strip() == "# Gadget snap":
                   in_gadget = True
                   continue
@@ -386,7 +337,6 @@ jobs:
                   if line.strip() == "":
                       in_gadget = False
                   continue
-              # Replace img artifact with rootfs-tarball
               if re.match(r"^\s{2}img:", line):
                   out.append("  rootfs-tarball:\n")
                   out.append("    name: rootfs.tar.gz\n")
@@ -404,54 +354,15 @@ jobs:
           PYEOF
           echo ""
 
-          echo "=== QEMU binfmt status ===" >> "${LOG}"
-          ls -la /proc/sys/fs/binfmt_misc/qemu-aarch64 2>&1 >> "${LOG}" || true
-          update-binfmts --display qemu-aarch64 2>&1 >> "${LOG}" || true
-
           echo "=== Network test ===" >> "${LOG}"
           curl -sI "http://ports.ubuntu.com/ubuntu-ports/" 2>&1 | head -3 >> "${LOG}" || echo "NETWORK FAIL" >> "${LOG}"
 
-          echo "=== Stage 1: build chroot, stop before package install ==="
+          echo "=== Building rootfs (native arm64, single stage) ==="
           UI_WORKDIR="${ARTIFACTS}/work"
           mkdir -p "${UI_WORKDIR}"
           set +e
           sudo /usr/local/bin/ubuntu-image classic \
             --workdir "${UI_WORKDIR}" \
-            --until install_packages \
-            "${TMP_YAML}" \
-            -O "${ARTIFACTS}" \
-            --debug 2>&1 | tee -a "${LOG}"
-          S1_EXIT=${PIPESTATUS[0]}
-          set -e
-          echo "Stage 1 exit: ${S1_EXIT}" | tee -a "${LOG}"
-          if [[ ${S1_EXIT} -ne 0 ]]; then
-            echo "## Stage 1 FAILED (exit ${S1_EXIT})" >> "${GITHUB_STEP_SUMMARY}"
-            echo '```' >> "${GITHUB_STEP_SUMMARY}"
-            tail -50 "${LOG}" >> "${GITHUB_STEP_SUMMARY}"
-            echo '```' >> "${GITHUB_STEP_SUMMARY}"
-            tail -50 "${LOG}"
-            exit 1
-          fi
-
-          echo "=== Patching chroot (py3compile + snapd info) ==="
-          CHROOT=$(find "${UI_WORKDIR}" -name chroot -type d 2>/dev/null | head -1)
-          if [[ -n "${CHROOT}" ]]; then
-            echo -e '#!/bin/bash\nexit 0' | sudo tee "${CHROOT}/usr/bin/py3compile" > /dev/null
-            sudo chmod +x "${CHROOT}/usr/bin/py3compile"
-            echo -e '#!/bin/bash\nexit 0' | sudo tee "${CHROOT}/usr/bin/py3clean" > /dev/null
-            sudo chmod +x "${CHROOT}/usr/bin/py3clean"
-            sudo mkdir -p "${CHROOT}/usr/lib/snapd"
-            echo "VERSION=unknown" | sudo tee "${CHROOT}/usr/lib/snapd/info" > /dev/null
-            echo "chroot patched" | tee -a "${LOG}"
-          else
-            echo "WARNING: chroot not found at ${UI_WORKDIR}" | tee -a "${LOG}"
-          fi
-
-          echo "=== Stage 2: install packages and complete build ==="
-          set +e
-          sudo /usr/local/bin/ubuntu-image classic \
-            --workdir "${UI_WORKDIR}" \
-            --resume \
             "${TMP_YAML}" \
             -O "${ARTIFACTS}" \
             --debug 2>&1 | tee -a "${LOG}"
