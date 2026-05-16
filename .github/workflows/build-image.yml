@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'ubuntu/**'
+      - 'arm64-classic.yaml'
       - '.github/workflows/build-image.yml'
   pull_request:
     branches: [main]
@@ -18,6 +19,14 @@ on:
           - noble
           - questing
         default: noble
+      config:
+        description: 'Image config to build'
+        required: false
+        type: choice
+        options:
+          - rk3576
+          - raspi
+        default: rk3576
 
 concurrency:
   group: build-image-${{ github.workflow }}-${{ github.ref }}
@@ -39,6 +48,7 @@ jobs:
     name: Build ${{ inputs.ubuntu_series || 'noble' }} rootfs
     runs-on: ubuntu-24.04
     timeout-minutes: 180
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.config != 'raspi' }}
 
     steps:
       - name: Checkout
@@ -295,3 +305,179 @@ jobs:
           make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # =========================================================================
+  # Build Raspberry Pi arm64 image with ubuntu-image classic
+  # Uses external Launchpad seeds + snap-pi gadget
+  # =========================================================================
+  build-raspi:
+    name: Build Raspi ${{ inputs.ubuntu_series || 'noble' }} image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.config == 'raspi' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install host dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            qemu-user-static binfmt-support \
+            debootstrap germinate \
+            gdisk e2fsprogs xz-utils dosfstools \
+            u-boot-tools device-tree-compiler \
+            git snapd
+
+          # Start snapd and wait for it to be ready
+          sudo systemctl start snapd || true
+          sudo systemctl enable snapd || true
+          sleep 5
+          sudo snap wait system seed.loaded 2>/dev/null || true
+
+          # Install snapcraft for gadget snap building
+          sudo snap install snapcraft --classic 2>&1 || {
+            echo "WARNING: snapcraft install failed, trying snapd snap build fallback"
+          }
+
+          sudo systemctl restart systemd-binfmt
+
+      - name: Install Go (ubuntu-image requires >=1.25)
+        run: |
+          GO_VER=1.25.0
+          curl -sL "https://go.dev/dl/go${GO_VER}.linux-amd64.tar.gz" -o /tmp/go.tar.gz
+          sudo tar -C /usr/local -xzf /tmp/go.tar.gz
+          echo "/usr/local/go/bin" >> $GITHUB_PATH
+          /usr/local/go/bin/go version
+
+      - name: Build ubuntu-image from source
+        run: |
+          git clone --depth 1 https://github.com/canonical/ubuntu-image.git /tmp/ubuntu-image
+          cd /tmp/ubuntu-image
+          go build -o ubuntu-image ./cmd/ubuntu-image
+          sudo cp ubuntu-image /usr/local/bin/ubuntu-image
+          /usr/local/bin/ubuntu-image --version
+
+      - name: Build Raspi image with ubuntu-image
+        run: |
+          set -euo pipefail
+          SERIES="${{ inputs.ubuntu_series || 'noble' }}"
+          MIRROR="http://ports.ubuntu.com/ubuntu-ports/"
+          ARTIFACTS="${{ github.workspace }}/raspi-artifacts"
+          rm -rf "${ARTIFACTS}"
+          mkdir -p "${ARTIFACTS}"
+          LOG="${ARTIFACTS}/ubuntu-image.log"
+          echo "=== ubuntu-image raspi build log ===" > "${LOG}"
+          echo "Series: ${SERIES}" >> "${LOG}"
+          echo "Start: $(date -u)" >> "${LOG}"
+
+          # Fix git:// → https:// (GH Actions blocks git protocol port 9418)
+          YAML_SRC="${{ github.workspace }}/arm64-classic.yaml"
+          TMP_YAML="${ARTIFACTS}/arm64-classic-resolved.yaml"
+          sed -e 's|git://git.launchpad.net|https://git.launchpad.net|g' \
+              -e "s|mirror:.*|mirror: \"${MIRROR}\"|" \
+              "${YAML_SRC}" > "${TMP_YAML}"
+
+          echo "=== Resolved YAML ==="
+          cat "${TMP_YAML}"
+          echo ""
+
+          echo "=== QEMU binfmt status ===" >> "${LOG}"
+          ls -la /proc/sys/fs/binfmt_misc/qemu-aarch64 2>&1 >> "${LOG}" || true
+          update-binfmts --display qemu-aarch64 2>&1 >> "${LOG}" || true
+
+          echo "=== Network test ===" >> "${LOG}"
+          curl -sI "http://ports.ubuntu.com/ubuntu-ports/" 2>&1 | head -3 >> "${LOG}" || echo "NETWORK FAIL" >> "${LOG}"
+
+          echo "=== Stage 1: build chroot, stop before package install ==="
+          UI_WORKDIR="${ARTIFACTS}/work"
+          mkdir -p "${UI_WORKDIR}"
+          set +e
+          sudo /usr/local/bin/ubuntu-image classic \
+            --workdir "${UI_WORKDIR}" \
+            --until install_packages \
+            "${TMP_YAML}" \
+            -O "${ARTIFACTS}" \
+            --debug 2>&1 | tee -a "${LOG}"
+          S1_EXIT=${PIPESTATUS[0]}
+          set -e
+          echo "Stage 1 exit: ${S1_EXIT}" | tee -a "${LOG}"
+          if [[ ${S1_EXIT} -ne 0 ]]; then
+            echo "## Stage 1 FAILED (exit ${S1_EXIT})" >> "${GITHUB_STEP_SUMMARY}"
+            echo '```' >> "${GITHUB_STEP_SUMMARY}"
+            tail -50 "${LOG}" >> "${GITHUB_STEP_SUMMARY}"
+            echo '```' >> "${GITHUB_STEP_SUMMARY}"
+            tail -50 "${LOG}"
+            exit 1
+          fi
+
+          echo "=== Patching chroot (py3compile + snapd info) ==="
+          CHROOT=$(find "${UI_WORKDIR}" -name chroot -type d 2>/dev/null | head -1)
+          if [[ -n "${CHROOT}" ]]; then
+            echo -e '#!/bin/bash\nexit 0' | sudo tee "${CHROOT}/usr/bin/py3compile" > /dev/null
+            sudo chmod +x "${CHROOT}/usr/bin/py3compile"
+            echo -e '#!/bin/bash\nexit 0' | sudo tee "${CHROOT}/usr/bin/py3clean" > /dev/null
+            sudo chmod +x "${CHROOT}/usr/bin/py3clean"
+            sudo mkdir -p "${CHROOT}/usr/lib/snapd"
+            echo "VERSION=unknown" | sudo tee "${CHROOT}/usr/lib/snapd/info" > /dev/null
+            echo "chroot patched" | tee -a "${LOG}"
+          else
+            echo "WARNING: chroot not found at ${UI_WORKDIR}" | tee -a "${LOG}"
+          fi
+
+          echo "=== Stage 2: install packages, build gadget, complete image ==="
+          set +e
+          sudo /usr/local/bin/ubuntu-image classic \
+            --workdir "${UI_WORKDIR}" \
+            --resume \
+            "${TMP_YAML}" \
+            -O "${ARTIFACTS}" \
+            --debug 2>&1 | tee -a "${LOG}"
+          UI_EXIT_CODE=${PIPESTATUS[0]}
+          set -e
+          echo "ubuntu-image exit code: ${UI_EXIT_CODE}"
+
+          echo ""
+          echo "=== Build output ==="
+          find "${ARTIFACTS}" -type f \( -name "*.img" -o -name "*.img.xz" \) -ls 2>/dev/null || true
+          ls -lh "${ARTIFACTS}/" || true
+
+          if find "${ARTIFACTS}" -maxdepth 1 -name "*.img*" | grep -q .; then
+            echo "SUCCESS: image created"
+          elif [[ ${UI_EXIT_CODE} -ne 0 ]]; then
+            echo "=== ubuntu-image FAILED (exit code: ${UI_EXIT_CODE}) ==="
+            echo "=== Last 100 lines of log ==="
+            tail -100 "${LOG}" || true
+            {
+              echo "## ubuntu-image Raspi Failed (exit code: ${UI_EXIT_CODE})"
+              echo '```'
+              tail -50 "${LOG}" 2>/dev/null
+              echo '```'
+            } >> "${GITHUB_STEP_SUMMARY}"
+            exit 1
+          else
+            echo "ERROR: no .img found in output!"
+            find "${ARTIFACTS}" -type f -ls 2>/dev/null || true
+            exit 1
+          fi
+
+      - name: Upload build log (always)
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: ubuntu-image-log-raspi-${{ inputs.ubuntu_series || 'noble' }}
+          path: raspi-artifacts/ubuntu-image.log
+          retention-days: 3
+
+      - name: Upload raspi image artifact
+        if: success()
+        uses: actions/upload-artifact@v6
+        with:
+          name: ubuntu-raspi-${{ inputs.ubuntu_series || 'noble' }}-arm64
+          path: |
+            raspi-artifacts/*.img
+            raspi-artifacts/*.img.xz
+            raspi-artifacts/*.manifest
+            raspi-artifacts/*.filelist
+          retention-days: 7
