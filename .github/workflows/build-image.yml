@@ -96,49 +96,13 @@ jobs:
             YAML="${SCRIPT_DIR}/image-definition-questing.yaml"
           fi
 
-          # Merge base seeds + local overrides into a single seed source.
-          # Germinate expects the layout: <seed-url>/<dist>/  (e.g. seed-url/ubuntu/)
-          # So we create seeds-git/ubuntu/ as the actual git repo, and the seed
-          # URL points to seeds-git/ (the parent).
-          SEEDS_OVERRIDE="${SCRIPT_DIR}/seeds-local"
-          SEEDS_BASE="${SCRIPT_DIR}/seeds"
-          [[ "${SERIES}" == "questing" ]] && SEEDS_BASE="${SCRIPT_DIR}/seeds-questing"
-          SEEDS_GIT="${ARTIFACTS}/seeds-git"        # seed URL points here (parent)
-          SEEDS_REPO="${SEEDS_GIT}/ubuntu"          # git repo with actual seed files
-          rm -rf "${SEEDS_GIT}"
-          mkdir -p "${SEEDS_REPO}"
-
-          # Copy base seeds into ubuntu/ subdirectory
-          if [[ -d "${SEEDS_BASE}" ]]; then
-            cp "${SEEDS_BASE}/"* "${SEEDS_REPO}/"
-            echo "Copied $(ls "${SEEDS_BASE}" | wc -l) base seed files"
-          else
-            echo "ERROR: Base seeds not found at ${SEEDS_BASE}"
-            exit 1
-          fi
-          # Overlay local seed overrides
-          for f in "${SEEDS_OVERRIDE}/"*; do
-            [[ -f "${f}" ]] && cp "${f}" "${SEEDS_REPO}/$(basename "${f}")"
-          done
-          echo "Merged seeds-local overrides into seed source"
-          echo "Final STRUCTURE:"
-          grep "^supported:" "${SEEDS_REPO}/STRUCTURE" || true
-
-          # Init git repo in ubuntu/ (germinate clones <seed-url>/ubuntu/)
-          (cd "${SEEDS_REPO}" && \
-            git init -q && \
-            git config user.email "ci@rockchip-ubuntu.local" && \
-            git config user.name "CI Builder" && \
-            git checkout -b "${SERIES}" -q && \
-            git add . && \
-            git commit -q -m "merged seeds for ${SERIES}")
-          echo "Seeds git repo ready at ${SEEDS_REPO}"
-
-          # Generate resolved YAML with mirror and seed URL
+          # Use Launchpad seeds directly — same approach as successful
+          # arm64-classic.yaml build.  No file:// URL (snap confinement
+          # blocks it) and no local seed merging needed.
           TMP_YAML="${ARTIFACTS}/image-definition-resolved.yaml"
+          SEED_URL="https://git.launchpad.net/~ubuntu-core-dev/ubuntu-seeds/+git/"
           sed -e "s|mirror:.*|mirror: \"${MIRROR}\"|" \
-              -e "s|SEED_URL_PLACEHOLDER|file://${SEEDS_GIT}|" \
-              -e '/vcs: true/d' \
+              -e "s|SEED_URL_PLACEHOLDER|${SEED_URL}|" \
               "${YAML}" > "${TMP_YAML}"
 
           echo "=== Resolved YAML ==="
