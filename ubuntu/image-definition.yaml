@@ -39,6 +39,10 @@ customization:
           - name: ubuntu
             password: ubuntu
             type: text
+  # Required for snap-preseed — ubuntu-image downloads core/snapd
+  # snaps from the store during the preseed_image step.
+  extra-snaps:
+    - name: snapd
   extra-packages:
     # Basic system tools needed by other package postinst scripts
     - name: file

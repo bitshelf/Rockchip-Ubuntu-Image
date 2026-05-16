@@ -63,7 +63,6 @@ jobs:
             u-boot-tools device-tree-compiler \
             git snapd
           sudo snap install ubuntu-image --classic
-          sudo snap install core
           sudo /snap/bin/ubuntu-image --version
 
       - name: Select config
@@ -238,7 +237,6 @@ jobs:
             u-boot-tools device-tree-compiler \
             git snapd
           sudo snap install ubuntu-image --classic
-          sudo snap install core
           sudo /snap/bin/ubuntu-image --version
 
       - name: Build Raspi rootfs with ubuntu-image
