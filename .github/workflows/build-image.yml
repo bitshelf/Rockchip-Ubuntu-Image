@@ -110,26 +110,32 @@ jobs:
             YAML="${SCRIPT_DIR}/image-definition-questing.yaml"
           fi
 
-          # Build local seed source from base seeds + local overrides.
-          # Germinate expects: <seed-url>/<dist>/  (e.g. seed-url/ubuntu/)
+          # Merge base seeds + local overrides into a single seed source.
+          # Germinate expects the layout: <seed-url>/<dist>/  (e.g. seed-url/ubuntu/)
+          # So we create seeds-git/ubuntu/ as the actual directory, and the seed
+          # URL points to seeds-git/ (the parent).  vcs:true is stripped —
+          # germinate reads the directory directly without git.
           SEEDS_OVERRIDE="${SCRIPT_DIR}/seeds-local"
           SEEDS_BASE="${SCRIPT_DIR}/seeds"
           [[ "${SERIES}" == "questing" ]] && SEEDS_BASE="${SCRIPT_DIR}/seeds-questing"
-          SEEDS_GIT="${ARTIFACTS}/seeds-git"
-          SEEDS_REPO="${SEEDS_GIT}/ubuntu"
+          SEEDS_GIT="${ARTIFACTS}/seeds-git"        # seed URL points here (parent)
+          SEEDS_REPO="${SEEDS_GIT}/ubuntu"          # seed files live here
           rm -rf "${SEEDS_GIT}"
           mkdir -p "${SEEDS_REPO}"
 
-          cp "${SEEDS_BASE}/"* "${SEEDS_REPO}/"
+          if [[ -d "${SEEDS_BASE}" ]]; then
+            cp "${SEEDS_BASE}/"* "${SEEDS_REPO}/"
+            echo "Copied $(ls "${SEEDS_BASE}" | wc -l) base seed files"
+          else
+            echo "ERROR: Base seeds not found at ${SEEDS_BASE}"
+            exit 1
+          fi
           for f in "${SEEDS_OVERRIDE}/"*; do
             [[ -f "${f}" ]] && cp "${f}" "${SEEDS_REPO}/$(basename "${f}")"
           done
           echo "Merged $(ls "${SEEDS_REPO}" | wc -l) seed files"
 
-          # Resolve YAML: replace mirror + seed URL, drop vcs:true.
-          # vcs:true causes germinate to git-clone file:// URLs, which
-          # fails on the arm64 runner.  Without it, germinate reads the
-          # directory directly — seeds-git/ubuntu/ has all seed files.
+          # Generate resolved YAML with mirror and seed URL, drop vcs:true.
           TMP_YAML="${ARTIFACTS}/image-definition-resolved.yaml"
           sed -e "s|mirror:.*|mirror: \"${MIRROR}\"|" \
               -e "s|SEED_URL_PLACEHOLDER|file://${SEEDS_GIT}|" \
